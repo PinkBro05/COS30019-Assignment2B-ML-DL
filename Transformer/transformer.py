@@ -5,7 +5,7 @@ import torch.nn.functional as F
 import pandas as pd
 import numpy as np
 from torch.utils.data import DataLoader, Dataset
-from data_collector import TrafficTimeSeriesDataset
+from Transformer.data_collector import load_time_series_data, create_time_series_dataloaders
 
 class TransformerEncoderLayer(nn.Module):
     def __init__(self, d_model, num_heads, d_ff, dropout=0.1):
@@ -125,9 +125,10 @@ class PositionalEncoding(nn.Module):
         return x
     
 class TransformerModel(nn.Module):
-    def __init__(self, vocab_size, d_model, num_heads, d_ff, output_size, num_layers, dropout=0.1):
+    def __init__(self, input_dim, d_model, num_heads, d_ff, output_size=1, num_layers=2, dropout=0.1):
         super(TransformerModel, self).__init__()
-        self.embedding = nn.Embedding(vocab_size, d_model)  # Ensure embed_size matches d_model
+        # Feature projection layer (instead of embedding)
+        self.input_projection = nn.Linear(input_dim, d_model)
         self.positional_encoding = PositionalEncoding(d_model)
         self.encoder_layers = nn.ModuleList([
             TransformerEncoderLayer(d_model, num_heads, d_ff, dropout)
@@ -137,31 +138,283 @@ class TransformerModel(nn.Module):
         self.dropout = nn.Dropout(dropout)
 
     def forward(self, x, mask=None):
-        x = self.embedding(x)
+        # Project input features to d_model dimensions
+        x = self.input_projection(x)
         x = self.positional_encoding(x)
         for layer in self.encoder_layers:
             x = layer(x, mask)
+        # Global average pooling across sequence dimension
         x = x.mean(dim=1)
+        # Final projection to output dimension
         x = self.fc(self.dropout(x))
         return x
     
+def train_model(model, train_loader, val_loader, optimizer, device, 
+                num_epochs=50, patience=10, use_mse_and_mae=True):
+    """
+    Train the transformer model using both MSE and MAE loss functions
+    
+    Args:
+        model: TransformerModel instance
+        train_loader: DataLoader for training data
+        val_loader: DataLoader for validation data
+        optimizer: PyTorch optimizer
+        device: Device to train on (cpu or cuda)
+        num_epochs: Maximum number of training epochs
+        patience: Early stopping patience
+        use_mse_and_mae: Whether to use both MSE and MAE loss functions
+    
+    Returns:
+        Dictionary with training history
+    """
+    model.to(device)
+    
+    # Loss functions
+    mse_loss = nn.MSELoss()
+    mae_loss = nn.L1Loss()
+    
+    # For early stopping
+    best_val_loss = float('inf')
+    epochs_without_improvement = 0
+    
+    history = {
+        'train_loss': [],
+        'val_loss': [],
+        'train_mse': [],
+        'val_mse': [],
+        'train_mae': [],
+        'val_mae': []
+    }
+    
+    for epoch in range(num_epochs):
+        # Training
+        model.train()
+        train_loss = 0.0
+        train_mse_total = 0.0
+        train_mae_total = 0.0
+        
+        for inputs, targets in train_loader:
+            inputs, targets = inputs.to(device), targets.to(device)
+            
+            # Forward pass
+            optimizer.zero_grad()
+            outputs = model(inputs)
+            
+            # Calculate losses
+            mse = mse_loss(outputs.squeeze(), targets)
+            mae = mae_loss(outputs.squeeze(), targets)
+            
+            # Combine losses if using both
+            if use_mse_and_mae:
+                loss = mse + mae  # Equal weighting
+            else:
+                loss = mse  # Use only MSE
+            
+            # Backpropagation
+            loss.backward()
+            optimizer.step()
+            
+            # Track metrics
+            train_loss += loss.item() * inputs.size(0)
+            train_mse_total += mse.item() * inputs.size(0)
+            train_mae_total += mae.item() * inputs.size(0)
+        
+        # Calculate average training losses
+        train_loss = train_loss / len(train_loader.dataset)
+        train_mse = train_mse_total / len(train_loader.dataset)
+        train_mae = train_mae_total / len(train_loader.dataset)
+        
+        # Validation
+        model.eval()
+        val_loss = 0.0
+        val_mse_total = 0.0
+        val_mae_total = 0.0
+        
+        with torch.no_grad():
+            for inputs, targets in val_loader:
+                inputs, targets = inputs.to(device), targets.to(device)
+                
+                # Forward pass
+                outputs = model(inputs)
+                
+                # Calculate losses
+                mse = mse_loss(outputs.squeeze(), targets)
+                mae = mae_loss(outputs.squeeze(), targets)
+                
+                # Combine losses if using both
+                if use_mse_and_mae:
+                    loss = mse + mae
+                else:
+                    loss = mse
+                
+                # Track metrics
+                val_loss += loss.item() * inputs.size(0)
+                val_mse_total += mse.item() * inputs.size(0)
+                val_mae_total += mae.item() * inputs.size(0)
+        
+        # Calculate average validation losses
+        val_loss = val_loss / len(val_loader.dataset)
+        val_mse = val_mse_total / len(val_loader.dataset)
+        val_mae = val_mae_total / len(val_loader.dataset)
+        
+        # Save history
+        history['train_loss'].append(train_loss)
+        history['val_loss'].append(val_loss)
+        history['train_mse'].append(train_mse)
+        history['val_mse'].append(val_mse)
+        history['train_mae'].append(train_mae)
+        history['val_mae'].append(val_mae)
+        
+        # Print progress
+        print(f'Epoch {epoch+1}/{num_epochs} | '
+              f'Train Loss: {train_loss:.4f} (MSE: {train_mse:.4f}, MAE: {train_mae:.4f}) | '
+              f'Val Loss: {val_loss:.4f} (MSE: {val_mse:.4f}, MAE: {val_mae:.4f})')
+        
+        # Early stopping
+        if val_loss < best_val_loss:
+            best_val_loss = val_loss
+            epochs_without_improvement = 0
+            # Could save best model here
+            best_model_state = model.state_dict()
+        else:
+            epochs_without_improvement += 1
+            if epochs_without_improvement >= patience:
+                print(f'Early stopping after {epoch+1} epochs')
+                # Restore best model
+                model.load_state_dict(best_model_state)
+                break
+    
+    return history, model
+
+def evaluate_model(model, test_loader, device):
+    """
+    Evaluate the trained model on test data
+    
+    Args:
+        model: Trained TransformerModel
+        test_loader: DataLoader for test data
+        device: Device to evaluate on
+    
+    Returns:
+        Dictionary with evaluation metrics
+    """
+    model.to(device)
+    model.eval()
+    
+    mse_loss = nn.MSELoss()
+    mae_loss = nn.L1Loss()
+    
+    test_mse = 0.0
+    test_mae = 0.0
+    all_predictions = []
+    all_targets = []
+    
+    with torch.no_grad():
+        for inputs, targets in test_loader:
+            inputs, targets = inputs.to(device), targets.to(device)
+            
+            # Forward pass
+            outputs = model(inputs)
+            
+            # Save predictions and targets
+            all_predictions.extend(outputs.squeeze().cpu().numpy())
+            all_targets.extend(targets.cpu().numpy())
+            
+            # Calculate losses
+            mse = mse_loss(outputs.squeeze(), targets)
+            mae = mae_loss(outputs.squeeze(), targets)
+            
+            # Track metrics
+            test_mse += mse.item() * inputs.size(0)
+            test_mae += mae.item() * inputs.size(0)
+    
+    # Calculate average test losses
+    test_mse = test_mse / len(test_loader.dataset)
+    test_mae = test_mae / len(test_loader.dataset)
+    
+    print(f'Test Results | MSE: {test_mse:.4f}, MAE: {test_mae:.4f}')
+    
+    return {
+        'mse': test_mse,
+        'mae': test_mae,
+        'predictions': np.array(all_predictions),
+        'targets': np.array(all_targets)
+    }
+
 def main():
-    # Create dataset
-    dataset = TrafficTimeSeriesDataset(
-        csv_path="Data/Transformed/transformed_scats_data.csv",
-        feature_cols=['SCATS Number', 'Location', 'Date']  # Customize features as needed
-    )
-
-    print (dataset[0])  # Check the first data point
-    print (dataset[0][1])  # Check the features of the first data point
-    # Create dataloaders
-    batch_size = 32
-    train_size = int(0.8 * len(dataset))
-    val_size = len(dataset) - train_size
-    train_dataset, val_dataset = torch.utils.data.random_split(dataset, [train_size, val_size])
-
-    train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
-    val_loader = DataLoader(val_dataset, batch_size=batch_size, shuffle=False)
+    try:
+        # Load data
+        traffic_flow = load_time_series_data()
+        
+        # Prepare data for supervised learning (1 step input, predict next step)
+        data = traffic_flow.prepare_data_for_training(
+            sequence_length=1,  # Use 1 time step (1 hour) as input
+            prediction_horizon=1,  # Predict 1 time step ahead
+            scale_method='standard'  # Standardize data
+        )
+        
+        # Create DataLoaders
+        batch_size = 64
+        dataloaders = create_time_series_dataloaders(data, batch_size=batch_size)
+        
+        # Get input dimensionality from data
+        input_dim = data['X_train'].shape[-1]  # Number of features
+        
+        # Initialize model
+        d_model = 64  # Hidden dimension
+        num_heads = 8  # Number of attention heads
+        d_ff = 256  # Feed-forward layer dimension
+        num_layers = 2  # Number of transformer layers
+        output_size = 1  # Predicting a single flow value
+        dropout = 0.1
+        
+        model = TransformerModel(
+            input_dim=input_dim,
+            d_model=d_model,
+            num_heads=num_heads,
+            d_ff=d_ff,
+            output_size=output_size,
+            num_layers=num_layers,
+            dropout=dropout
+        )
+        
+        # Setup training
+        learning_rate = 0.001
+        device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+        optimizer = torch.optim.Adam(model.parameters(), lr=learning_rate)
+        
+        # Train model
+        print(f"Training model on {device}...")
+        history, trained_model = train_model(
+            model=model,
+            train_loader=dataloaders['train'],
+            val_loader=dataloaders['val'],
+            optimizer=optimizer,
+            device=device,
+            num_epochs=50,
+            patience=10,
+            use_mse_and_mae=True  # Use both MSE and MAE losses
+        )
+        
+        # Evaluate model
+        results = evaluate_model(
+            model=trained_model,
+            test_loader=dataloaders['test'],
+            device=device
+        )
+        
+        print("\nTraining complete!")
+        print(f"Test MSE: {results['mse']:.4f}")
+        print(f"Test MAE: {results['mae']:.4f}")
+        
+        # Save model
+        torch.save(trained_model.state_dict(), 'Transformer/models/transformer_model_1.pth')
+        
+    except Exception as e:
+        import traceback
+        print(f"Error in main: {e}")
+        traceback.print_exc()
+        return None, None, None
 
 if __name__ == "__main__":
     main()
