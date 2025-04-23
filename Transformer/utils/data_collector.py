@@ -78,7 +78,7 @@ class TimeSeriesTrafficFlow:
         
         # Features to use for training, using DayofWeek since the traffic flow offten cycles weekly (common sense)
         feature_columns = [
-            'SCATS Number', 'Location', 'Hour', 'Minute', 'DayOfWeek', 'Flow'
+            'SCATS Number', 'Location', 'Hour', 'Minute', 'DayOfWeek'
         ]
         
         # Filter to only include columns that exist

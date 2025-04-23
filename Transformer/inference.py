@@ -171,10 +171,10 @@ def main():
     print(f"Using device: {device}")
     
     # Example location (SCATS number, location name)
-    location = (970, "Swan St - Punt Rd")
+    location = (970, "WARRIGAL_RD N of HIGH STREET_RD")
     
     # Example time (format: DD/MM/YYYY HH:MM:SS)
-    time_str = "23/04/2025 08:00:00"
+    time_str = "23/04/2025 00:00:00"
     
     print(f"\nPredicting traffic flow for:")
     print(f"Location: {location[1]} (SCATS #{location[0]})")
@@ -207,5 +207,5 @@ def main():
         print(f"Error during prediction: {e}")
         traceback.print_exc()
     
-if __name__ == "main":
+if __name__ == "__main__":
     main()
