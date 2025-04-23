@@ -233,7 +233,7 @@ def main():
             val_loader=dataloaders['val'],
             optimizer=optimizer,
             device=device,
-            num_epochs=1,
+            num_epochs=30,
             patience=10,
         )
         
