@@ -5,6 +5,7 @@ from sklearn.preprocessing import StandardScaler, MinMaxScaler
 from sklearn.model_selection import train_test_split
 import torch
 from torch.utils.data import Dataset, DataLoader
+from sklearn.impute import KNNImputer
 
 class TimeSeriesTrafficFlow:
     """
@@ -52,6 +53,21 @@ class TimeSeriesTrafficFlow:
                 print(f"Error processing datetime: {e}")
                 print("Date column format may not be compatible.")
     
+    def clean_data(self):
+        """Clean the data by replacing missing values with the k nearest neighbors"""
+        print("Cleaning data...")
+        
+        # Check for missing values
+        if self.data.isnull().values.any():
+            print("Missing values found. Filling with k nearest neighbors...")
+            
+            # Initialize KNN imputer
+            imputer = KNNImputer(n_neighbors=4)
+            
+            # Impute missing values
+            self.data.iloc[:, :] = imputer.fit_transform(self.data)
+            print("Missing values filled.")
+
     def prepare_data_for_training(self, target_col='Flow', test_size=0.2, val_size=0.1, 
                                   random_state=42, scale_method='standard',
                                   sequence_length=4, prediction_horizon=1):
@@ -94,6 +110,13 @@ class TimeSeriesTrafficFlow:
         for col in categorical_columns:
             if col in data_processed.columns:
                 data_processed[col] = pd.Categorical(data_processed[col]).codes
+
+        # Clean the data
+        self.clean_data()
+
+        # Check for missing values after cleaning
+        if data_processed.isnull().values.any():
+            raise ValueError("Data still contains missing values after cleaning.")
         
         # Create sequences of data
         sequences = self._create_sequences(
@@ -208,7 +231,7 @@ class TimeSeriesTrafficFlow:
             prediction_horizon: Steps ahead to predict
         
         Returns:
-            List of sequence dictionaries with 'features' and 'target'
+            List of sequence dictionaries with 'features' and 'target', the sequence overlap 3 time frames
         """
         sequences = []
         

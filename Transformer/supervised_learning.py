@@ -190,7 +190,7 @@ def main():
         
         # Prepare data for supervised learning with explicit feature columns
         data = traffic_flow.prepare_data_for_training(
-            sequence_length=4,  # Use 1 time step as input
+            sequence_length=1,  # Use 1 time step as input
             prediction_horizon=1,  # Predict 1 time step ahead
             scale_method='standard'  # Standardize data
         )
