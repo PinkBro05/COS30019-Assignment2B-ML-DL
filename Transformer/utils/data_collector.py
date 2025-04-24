@@ -70,7 +70,7 @@ class TimeSeriesTrafficFlow:
 
     def prepare_data_for_training(self, target_col='Flow', test_size=0.2, val_size=0.1, 
                                   random_state=42, scale_method='standard',
-                                  sequence_length=4, prediction_horizon=1):
+                                  sequence_length=4, prediction_horizon=4):
         """
         Prepare time series data for training.
         
@@ -166,11 +166,28 @@ class TimeSeriesTrafficFlow:
             X_val = X_val_2d.reshape(shape_X_val)
             X_test = X_test_2d.reshape(shape_X_test)
             
-            # Scale targets
+            # Scale targets - PRESERVE MULTI-STEP STRUCTURE
             scaler_y = StandardScaler()
-            y_train = scaler_y.fit_transform(y_train.reshape(-1, 1)).reshape(-1)
-            y_val = scaler_y.transform(y_val.reshape(-1, 1)).reshape(-1)
-            y_test = scaler_y.transform(y_test.reshape(-1, 1)).reshape(-1)
+            
+            # Save original shapes
+            shape_y_train = y_train.shape
+            shape_y_val = y_val.shape
+            shape_y_test = y_test.shape
+            
+            # Reshape to 2D for scaling (flatten the multi-step dimension)
+            y_train_2d = y_train.reshape(-1, 1)
+            y_val_2d = y_val.reshape(-1, 1)
+            y_test_2d = y_test.reshape(-1, 1)
+            
+            # Scale the targets
+            y_train_2d = scaler_y.fit_transform(y_train_2d)
+            y_val_2d = scaler_y.transform(y_val_2d)
+            y_test_2d = scaler_y.transform(y_test_2d)
+            
+            # Reshape back to original multi-step structure
+            y_train = y_train_2d.reshape(shape_y_train)
+            y_val = y_val_2d.reshape(shape_y_val)
+            y_test = y_test_2d.reshape(shape_y_test)
             
             scalers = {'X': scaler_X, 'y': scaler_y}
             
@@ -194,11 +211,28 @@ class TimeSeriesTrafficFlow:
             X_val = X_val_2d.reshape(shape_X_val)
             X_test = X_test_2d.reshape(shape_X_test)
             
-            # Scale targets
+            # Scale targets - PRESERVE MULTI-STEP STRUCTURE
             scaler_y = MinMaxScaler()
-            y_train = scaler_y.fit_transform(y_train.reshape(-1, 1)).reshape(-1)
-            y_val = scaler_y.transform(y_val.reshape(-1, 1)).reshape(-1)
-            y_test = scaler_y.transform(y_test.reshape(-1, 1)).reshape(-1)
+            
+            # Save original shapes
+            shape_y_train = y_train.shape
+            shape_y_val = y_val.shape
+            shape_y_test = y_test.shape
+            
+            # Reshape to 2D for scaling (flatten the multi-step dimension)
+            y_train_2d = y_train.reshape(-1, 1)
+            y_val_2d = y_val.reshape(-1, 1)
+            y_test_2d = y_test.reshape(-1, 1)
+            
+            # Scale the targets
+            y_train_2d = scaler_y.fit_transform(y_train_2d)
+            y_val_2d = scaler_y.transform(y_val_2d)
+            y_test_2d = scaler_y.transform(y_test_2d)
+            
+            # Reshape back to original multi-step structure
+            y_train = y_train_2d.reshape(shape_y_train)
+            y_val = y_val_2d.reshape(shape_y_val)
+            y_test = y_test_2d.reshape(shape_y_test)
             
             scalers = {'X': scaler_X, 'y': scaler_y}
             
@@ -219,7 +253,7 @@ class TimeSeriesTrafficFlow:
         
         return data
     
-    def _create_sequences(self, data, feature_columns, target_col, sequence_length=4, prediction_horizon=1):
+    def _create_sequences(self, data, feature_columns, target_col, sequence_length=4, prediction_horizon=4):
         """
         Create sequences from time series data.
         
@@ -236,10 +270,10 @@ class TimeSeriesTrafficFlow:
         sequences = []
         
         # Group data by location and date to ensure we're working with continuous data
-        if 'SCATS Number' in data.columns and 'Date_Only' in data.columns:
-            groups = data.groupby(['SCATS Number', 'Date_Only'])
-        elif 'SCATS Number' in data.columns:
-            groups = data.groupby(['SCATS Number'])
+        if 'Location' in data.columns and 'Date_Only' in data.columns:
+            groups = data.groupby(['Location', 'Date_Only'])
+        elif 'Location' in data.columns:
+            groups = data.groupby(['Location'])
         else:
             # If we don't have grouping columns, treat all data as one group
             groups = [(None, data)]
@@ -260,11 +294,13 @@ class TimeSeriesTrafficFlow:
             # Create sequences
             for i in range(len(group_data) - sequence_length - prediction_horizon + 1):
                 feature_seq = features[i:i+sequence_length]
-                target_value = targets[i+sequence_length+prediction_horizon-1]
+                
+                # Extract multiple targets for next 4 time steps (1 hour)
+                target_values = targets[i+sequence_length:i+sequence_length+prediction_horizon]
                 
                 sequences.append({
                     'features': feature_seq,
-                    'target': target_value
+                    'target': target_values
                 })
         
         return sequences
@@ -367,11 +403,17 @@ def show_sample_data(data_dict, num_samples=5):
         # If we have sequence data (3D tensor)
         if len(x.shape) > 1:
             for j, time_step in enumerate(x):
-                print(f"  Time step {j+1}: {time_step}")
+                print(f"  Input time step {j+1}: {time_step}")
         else:
             print(f"  Features: {x}")
         
-        print(f"  Target: {y}")
+        # Display multi-step targets
+        if len(y.shape) > 0 and y.shape[0] > 1:
+            print(f"  Targets (next {len(y)} time steps):")
+            for j, target_val in enumerate(y):
+                print(f"    Step {j+1}: {target_val}")
+        else:
+            print(f"  Target: {y}")
     
     # If scalers are available, try to inverse transform to show original values
     if data_dict['scalers'] is not None:
@@ -392,8 +434,16 @@ def show_sample_data(data_dict, num_samples=5):
             else:  # Non-sequence data (2D)
                 X_samples_original = scaler_X.inverse_transform(X_samples)
             
-            # Inverse transform y samples
-            y_samples_original = scaler_y.inverse_transform(y_samples.reshape(-1, 1)).reshape(-1)
+            # Inverse transform y samples - handle multi-step targets properly
+            y_shape = y_samples.shape
+            if len(y_shape) > 1:
+                # Multi-step targets
+                y_samples_2d = y_samples.reshape(-1, 1)
+                y_samples_original_2d = scaler_y.inverse_transform(y_samples_2d)
+                y_samples_original = y_samples_original_2d.reshape(y_shape)
+            else:
+                # Single-step targets
+                y_samples_original = scaler_y.inverse_transform(y_samples.reshape(-1, 1)).reshape(-1)
             
             # Print original values
             for i, (x, y) in enumerate(zip(X_samples_original, y_samples_original)):
@@ -402,11 +452,17 @@ def show_sample_data(data_dict, num_samples=5):
                 # If we have sequence data (3D tensor)
                 if len(x.shape) > 1:
                     for j, time_step in enumerate(x):
-                        print(f"  Time step {j+1}: {time_step}")
+                        print(f"  Input time step {j+1}: {time_step}")
                 else:
                     print(f"  Features: {x}")
                 
-                print(f"  Target: {y}")
+                # Display multi-step targets
+                if len(y.shape) > 0 and y.shape[0] > 1:
+                    print(f"  Targets (next {len(y)} time steps):")
+                    for j, target_val in enumerate(y):
+                        print(f"    Step {j+1}: {target_val}")
+                else:
+                    print(f"  Target: {y}")
                 
         except Exception as e:
             print(f"Could not inverse transform scaled data: {e}")
@@ -420,7 +476,7 @@ def time_series_data_example():
         # Prepare data for training
         data = traffic_flow.prepare_data_for_training(
             sequence_length=4,  # Use 4 time steps (1 hour) as input
-            prediction_horizon=1,  # Predict 1 time step ahead (15 minutes)
+            prediction_horizon=4,  # Predict 4 time step ahead (1 hour)
             scale_method='standard'
         )
         

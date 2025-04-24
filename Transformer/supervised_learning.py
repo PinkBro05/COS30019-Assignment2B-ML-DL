@@ -7,7 +7,7 @@ import numpy as np
 import argparse
 import matplotlib.pyplot as plt
 
-from utils.data_collector import load_time_series_data, create_time_series_dataloaders
+from utils.data_collector import load_time_series_data, create_time_series_dataloaders, show_sample_data
 from models.vanila_encoder import TransformerModel
     
 def train_model(model, train_loader, val_loader, optimizer, device, 
@@ -39,6 +39,8 @@ def train_model(model, train_loader, val_loader, optimizer, device,
         'val_loss': []
     }
     
+    best_model_state = None
+    
     for epoch in range(num_epochs):
         # Training
         model.train()
@@ -51,18 +53,19 @@ def train_model(model, train_loader, val_loader, optimizer, device,
             optimizer.zero_grad()
             outputs = model(inputs)
             
-            # Calculate loss
-            loss = mse_loss(outputs.squeeze(), targets)
+            # Ensure outputs and targets have the right shape for multi-step prediction
+            # outputs shape should be [batch_size, output_size] where output_size=4
+            # targets shape should be [batch_size, output_size] where output_size=4
+            loss = mse_loss(outputs, targets)
             
-            # Backpropagation
+            # Backward pass
             loss.backward()
             optimizer.step()
             
-            # Track metrics
-            train_loss += loss.item() * inputs.size(0)
+            train_loss += loss.item()
         
-        # Calculate average training loss
-        train_loss = train_loss / len(train_loader.dataset)
+        # Average loss over batches
+        train_loss /= len(train_loader)
         
         # Validation
         model.eval()
@@ -71,20 +74,14 @@ def train_model(model, train_loader, val_loader, optimizer, device,
         with torch.no_grad():
             for inputs, targets in val_loader:
                 inputs, targets = inputs.to(device), targets.to(device)
-                
-                # Forward pass
                 outputs = model(inputs)
-                
-                # Calculate loss
-                loss = mse_loss(outputs.squeeze(), targets)
-                
-                # Track metrics
-                val_loss += loss.item() * inputs.size(0)
+                loss = mse_loss(outputs, targets)
+                val_loss += loss.item()
         
-        # Calculate average validation loss
-        val_loss = val_loss / len(val_loader.dataset)
+        # Average loss over batches
+        val_loss /= len(val_loader)
         
-        # Save history
+        # Record history
         history['train_loss'].append(train_loss)
         history['val_loss'].append(val_loss)
         
@@ -111,24 +108,22 @@ def train_model(model, train_loader, val_loader, optimizer, device,
 
 def evaluate_model(model, test_loader, device):
     """
-    Evaluate the trained model on test data
+    Evaluate model on test data
     
     Args:
-        model: Trained TransformerModel
+        model: Trained model
         test_loader: DataLoader for test data
         device: Device to evaluate on
-    
+        
     Returns:
         Dictionary with evaluation metrics
     """
-    model.to(device)
     model.eval()
     
-    mse_loss = nn.MSELoss()
-    
-    test_mse = 0.0
-    all_predictions = []
+    all_preds = []
     all_targets = []
+    mse_loss = nn.MSELoss()
+    total_loss = 0.0
     
     with torch.no_grad():
         for inputs, targets in test_loader:
@@ -137,47 +132,53 @@ def evaluate_model(model, test_loader, device):
             # Forward pass
             outputs = model(inputs)
             
-            # Save predictions and targets
-            all_predictions.extend(outputs.squeeze().cpu().numpy())
-            all_targets.extend(targets.cpu().numpy())
+            # MSE loss calculated across all 4 prediction steps
+            loss = mse_loss(outputs, targets)
+            total_loss += loss.item() * inputs.size(0)
             
-            # Calculate losses
-            mse = mse_loss(outputs.squeeze(), targets)
-            
-            # Track metrics
-            test_mse += mse.item() * inputs.size(0)
+            # Store predictions and targets
+            all_preds.append(outputs.cpu().numpy())
+            all_targets.append(targets.cpu().numpy())
     
-    # Calculate average test losses
-    test_mse = test_mse / len(test_loader.dataset)
+    # Calculate average MSE
+    avg_loss = total_loss / len(test_loader.dataset)
     
-    print(f'Test Results | MSE: {test_mse:.4f}')
+    # Combine all predictions and targets
+    all_preds = np.vstack(all_preds)
+    all_targets = np.vstack(all_targets)
     
-    return {
-        'mse': test_mse,
-        'predictions': np.array(all_predictions),
-        'targets': np.array(all_targets)
+    # Calculate MSE for each time step
+    step_mse = []
+    for step in range(all_preds.shape[1]):
+        step_mse.append(np.mean((all_preds[:, step] - all_targets[:, step]) ** 2))
+    
+    results = {
+        'mse': avg_loss,
+        'step_mse': step_mse,
+        'predictions': all_preds,
+        'targets': all_targets
     }
     
-def plot_training_history(history):
-    """ Plot training history for loss and metrics
+    return results
 
-    Args:
-        history: Dictionary with training history
-    """
-    plt.figure(figsize=(5, 5))
+def plot_training_history(history):
+    """Plot training history"""
+    plt.figure(figsize=(12, 4))
     
-    # Losses
-    plt.subplot(1, 2, 1)
-    plt.plot(history['train_loss'], label='Train Loss')
+    # Plot training and validation loss
+    plt.subplot(1, 1, 1)
+    plt.plot(history['train_loss'], label='Training Loss')
     plt.plot(history['val_loss'], label='Validation Loss')
-    plt.title('Loss')
-    plt.xlabel('Epochs')
-    plt.ylabel('Loss')
+    plt.title('Loss During Training')
+    plt.xlabel('Epoch')
+    plt.ylabel('Mean Squared Error')
     plt.legend()
+    plt.grid(True)
     
     plt.tight_layout()
+    plt.savefig("Transformer/transformer_training_history.png")
     plt.show()
-    
+
 def main():
     argparser = argparse.ArgumentParser(description="Train a Transformer model for traffic flow prediction")
     argparser.add_argument('--save_id', type=str, default='test', help='ID for saving the model')
@@ -190,10 +191,13 @@ def main():
         
         # Prepare data for supervised learning with explicit feature columns
         data = traffic_flow.prepare_data_for_training(
-            sequence_length=1,  # Use 1 time step as input
-            prediction_horizon=1,  # Predict 1 time step ahead
+            sequence_length=4,  # Use 4 time steps as input (1 hour)
+            prediction_horizon=4,  # Predict 4 time steps ahead (1 hour)
             scale_method='standard'  # Standardize data
         )
+        
+        # Show sample data
+        show_sample_data(data)
         
         # Create DataLoaders
         batch_size = 64
@@ -207,7 +211,7 @@ def main():
         num_heads = 8  # Number of attention heads
         d_ff = 256  # Feed-forward layer dimension
         num_layers = 2  # Number of transformer layers
-        output_size = 1  # Predicting a single flow value
+        output_size = 4  # Predicting next 4 time steps (1 hour)
         dropout = 0.1
         
         model = TransformerModel(

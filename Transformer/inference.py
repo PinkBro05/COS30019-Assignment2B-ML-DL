@@ -35,45 +35,62 @@ def inference(model, location, time_str, device, data_dict=None):
     # Create features for the next 4 time frames
     predictions = []
     
-    # For each 15-minute interval in the next hour
+    # Get feature columns from data_dict if available
+    feature_columns = data_dict.get('feature_columns', 
+                                   ['SCATS Number', 'Location', 'Hour', 'Minute', 'DayOfWeek'])
+    
+    # Create a sequence of 4 time steps (15-min intervals) as input
+    sequence_data = []
+    current_time = dt
+    
+    # Create a sequence of the current time and the 3 previous 15-minute intervals
     for i in range(4):
-        # Calculate the target time (current time + i*15 minutes)
-        target_time = dt + datetime.timedelta(minutes=15 * i)
+        time_step = current_time - datetime.timedelta(minutes=(3-i)*15)
         
-        # Extract time features
-        hour = target_time.hour
-        minute = target_time.minute
-        day_of_week = target_time.weekday()  # 0 = Monday, 6 = Sunday
+        # Extract features
+        features = {
+            'SCATS Number': scats_number,  # Should be encoded, but for now use as is
+            'Location': 0,  # Placeholder, will be encoded
+            'Hour': time_step.hour,
+            'Minute': time_step.minute,
+            'DayOfWeek': time_step.weekday()
+        }
         
-        # Create input features: [SCATS Number, Location, Hour, Minute, DayOfWeek]
-        features = [scats_number, hash(location_str) % 10000, hour, minute, day_of_week]  # Hash location to numeric
+        # Keep only the features mentioned in feature_columns
+        features = {k: features[k] for k in feature_columns if k in features}
         
-        # Convert to numpy array
-        input_features = np.array([features], dtype=np.float32)
-        
-        # Apply scaling if scalers are available
-        if data_dict and 'scalers' in data_dict and data_dict['scalers']:
-            scaler_X = data_dict['scalers']['X']
-            input_features = scaler_X.transform(input_features)
-        
-        # Convert to tensor and add sequence dimension if model expects it
-        input_tensor = torch.tensor(input_features, dtype=torch.float32).unsqueeze(1)
-        input_tensor = input_tensor.to(device)
-        
-        # Get prediction
-        with torch.no_grad():
-            output = model(input_tensor)
-            
-        # Convert prediction back to original scale
-        if data_dict and 'scalers' in data_dict and data_dict['scalers']:
-            scaler_y = data_dict['scalers']['y']
-            pred = scaler_y.inverse_transform(output.cpu().numpy().reshape(-1, 1)).item()
-        else:
-            pred = output.item()
-        
+        # Add to sequence
+        sequence_data.append([features[col] for col in feature_columns])
+    
+    # Convert to numpy array
+    input_sequence = np.array(sequence_data)
+    
+    # Scale features if scalers are available
+    if data_dict and 'scalers' in data_dict and data_dict['scalers'] is not None:
+        scaler_X = data_dict['scalers']['X']
+        input_sequence = scaler_X.transform(input_sequence)
+    
+    # Convert to PyTorch tensor and add batch dimension
+    input_tensor = torch.tensor(input_sequence, dtype=torch.float32).unsqueeze(0).to(device)
+    
+    # Perform inference
+    with torch.no_grad():
+        output = model(input_tensor)
+        predicted_values = output.cpu().numpy()[0]  # Remove batch dimension
+    
+    # Inverse transform if scalers are available
+    if data_dict and 'scalers' in data_dict and data_dict['scalers'] is not None:
+        scaler_y = data_dict['scalers']['y']
+        predicted_values = scaler_y.inverse_transform(predicted_values.reshape(-1, 1)).flatten()
+    
+    # Create a list of predictions with timestamps
+    next_time = dt
+    
+    for i in range(4):  # 4 predictions for the next hour
+        next_time = next_time + datetime.timedelta(minutes=15)
         predictions.append({
-            'time': target_time.strftime("%H:%M"),
-            'flow': max(0, round(pred))  # Ensure flow is non-negative and rounded to integer
+            'time': next_time.strftime("%H:%M:%S"),
+            'flow': round(float(predicted_values[i]), 1)
         })
     
     return predictions
@@ -98,8 +115,8 @@ def predict_flow(model_path, location, time_str, device=None):
     try:
         traffic_flow = load_time_series_data()
         data = traffic_flow.prepare_data_for_training(
-            sequence_length=1,
-            prediction_horizon=1,
+            sequence_length=4,
+            prediction_horizon=4,
             scale_method='standard'
         )
     except Exception as e:
@@ -121,7 +138,7 @@ def predict_flow(model_path, location, time_str, device=None):
             d_model=64,
             num_heads=8,
             d_ff=256,
-            output_size=1,
+            output_size=4,
             num_layers=2,
             dropout=0.1
         )
@@ -201,11 +218,11 @@ def main():
                 
         else:
             print("Prediction failed. See error messages above.")
-    
+            
     except Exception as e:
         import traceback
         print(f"Error during prediction: {e}")
         traceback.print_exc()
-    
+
 if __name__ == "__main__":
     main()
