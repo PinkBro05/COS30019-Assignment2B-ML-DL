@@ -197,7 +197,7 @@ def main():
         )
         
         # Show sample data
-        show_sample_data(data)
+        # show_sample_data(data)
         
         # Create DataLoaders
         batch_size = 64
