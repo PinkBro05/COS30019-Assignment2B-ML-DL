@@ -11,7 +11,7 @@ from utils.data_collector import load_time_series_data, create_time_series_datal
 from models.vanila_encoder import TransformerModel
     
 def train_model(model, train_loader, val_loader, optimizer, device, 
-                num_epochs=50, patience=10):
+                num_epochs=50, patience=10, save_path=None):
     """
     Args:
         model: TransformerModel instance
@@ -21,6 +21,7 @@ def train_model(model, train_loader, val_loader, optimizer, device,
         device: Device to train on (cpu or cuda)
         num_epochs: Maximum number of training epochs
         patience: Early stopping patience
+        save_path: Path to save the best model (if None, model is not saved separately)
     
     Returns:
         Dictionary with training history and trained model
@@ -30,13 +31,24 @@ def train_model(model, train_loader, val_loader, optimizer, device,
     # Loss function
     mse_loss = nn.MSELoss()
     
+    # Learning rate scheduler - will reduce LR when validation loss plateaus
+    scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
+        optimizer, 
+        mode='min', 
+        factor=0.5,  # Reduce LR by half when plateau is detected
+        patience=patience//2,  # Wait for half the early stopping patience
+        verbose=True,
+        min_lr=1e-6
+    )
+    
     # For early stopping
     best_val_loss = float('inf')
     epochs_without_improvement = 0
     
     history = {
         'train_loss': [],
-        'val_loss': []
+        'val_loss': [],
+        'learning_rates': []
     }
     
     best_model_state = None
@@ -81,28 +93,46 @@ def train_model(model, train_loader, val_loader, optimizer, device,
         # Average loss over batches
         val_loss /= len(val_loader)
         
+        # Update learning rate scheduler
+        scheduler.step(val_loss)
+        
         # Record history
         history['train_loss'].append(train_loss)
         history['val_loss'].append(val_loss)
+        history['learning_rates'].append(optimizer.param_groups[0]['lr'])
         
         # Print progress
         print(f'Epoch {epoch+1}/{num_epochs} | '
               f'Train Loss (MSE): {train_loss:.4f} | '
-              f'Val Loss (MSE): {val_loss:.4f}')
+              f'Val Loss (MSE): {val_loss:.4f} | '
+              f'LR: {optimizer.param_groups[0]["lr"]:.6f}')
         
-        # Early stopping
+        # Check for improvement
         if val_loss < best_val_loss:
+            improvement = best_val_loss - val_loss
+            print(f'Validation loss improved by {improvement:.6f}')
             best_val_loss = val_loss
             epochs_without_improvement = 0
-            # Could save best model here
-            best_model_state = model.state_dict()
+            
+            # Save best model state
+            best_model_state = model.state_dict().copy()
+            
+            # Save best model to disk if path is provided
+            if save_path:
+                torch.save(best_model_state, save_path)
+                print(f'Saved best model to {save_path}')
         else:
             epochs_without_improvement += 1
+            print(f'No improvement for {epochs_without_improvement} epochs')
             if epochs_without_improvement >= patience:
                 print(f'Early stopping after {epoch+1} epochs')
                 # Restore best model
                 model.load_state_dict(best_model_state)
                 break
+    
+    # Always restore best model at the end
+    if best_model_state is not None:
+        model.load_state_dict(best_model_state)
     
     return history, model
 
@@ -163,10 +193,10 @@ def evaluate_model(model, test_loader, device):
 
 def plot_training_history(history):
     """Plot training history"""
-    plt.figure(figsize=(12, 4))
+    plt.figure(figsize=(12, 8))
     
     # Plot training and validation loss
-    plt.subplot(1, 1, 1)
+    plt.subplot(2, 1, 1)
     plt.plot(history['train_loss'], label='Training Loss')
     plt.plot(history['val_loss'], label='Validation Loss')
     plt.title('Loss During Training')
@@ -174,6 +204,16 @@ def plot_training_history(history):
     plt.ylabel('Mean Squared Error')
     plt.legend()
     plt.grid(True)
+    
+    # Plot learning rate
+    if 'learning_rates' in history:
+        plt.subplot(2, 1, 2)
+        plt.plot(history['learning_rates'], 'r-')
+        plt.title('Learning Rate')
+        plt.xlabel('Epoch')
+        plt.ylabel('Learning Rate')
+        plt.grid(True)
+        plt.yscale('log')  # Log scale for better visualization of LR changes
     
     plt.tight_layout()
     plt.savefig("Transformer/transformer_training_history.png")
@@ -246,7 +286,7 @@ def main():
         # Setup training
         learning_rate = args.learning_rate
         device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-        optimizer = torch.optim.Adam(model.parameters(), lr=learning_rate)
+        optimizer = torch.optim.AdamW(model.parameters(), lr=learning_rate, weight_decay=1e-4)
         
         # Train model
         print(f"Training model on {device}...")
@@ -258,6 +298,7 @@ def main():
             device=device,
             num_epochs=args.num_epochs,
             patience=args.patience,
+            save_path=f"Transformer/save_models/transformer_model_{args.save_id}.pth"
         )
         
         # Evaluate model

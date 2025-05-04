@@ -37,11 +37,36 @@ def inference(model, location, time_str, device, data_dict=None):
     
     # Get feature columns from data_dict if available
     feature_columns = data_dict.get('feature_columns', 
-                                   ['SCATS Number', 'Location', 'Hour', 'Minute', 'DayOfWeek'])
+                                   ['SCATS_Number', 'Location', 'Hour', 'Minute', 'DayOfWeek'])
     
     # Create a sequence of 12 time steps (15-min intervals) as input
     sequence_data = []
     current_time = dt
+    
+    # If we have the training data, get the categorical encodings for SCATS_Number
+    scats_encoding = None
+    if data_dict and 'original_data' in data_dict:
+        # Get the mapping of SCATS numbers to their encoded values
+        try:
+            original_data = data_dict['original_data']
+            if 'SCATS_Number' in original_data.columns:
+                # Find the corresponding encoded value for this SCATS number
+                scats_data = original_data[original_data['SCATS_Number'] == scats_number]
+                if not scats_data.empty:
+                    # Use the first encoded value found
+                    scats_encoding = pd.Categorical(scats_data['SCATS_Number']).codes[0]
+                else:
+                    # Default fallback if this SCATS number wasn't in training
+                    print(f"Warning: SCATS number {scats_number} not found in training data")
+                    # Use the raw value, which might cause issues
+                    scats_encoding = scats_number
+        except Exception as e:
+            print(f"Warning: Could not encode SCATS number: {e}")
+            # Fallback to using the raw value
+            scats_encoding = scats_number
+    else:
+        # No data dictionary available, use raw value
+        scats_encoding = scats_number
     
     # Create a sequence of the current time and the 11 previous 15-minute intervals
     for i in range(12):
@@ -49,7 +74,7 @@ def inference(model, location, time_str, device, data_dict=None):
         
         # Extract features
         features = {
-            'SCATS Number': scats_number,  # Should be encoded, but for now use as is
+            'SCATS_Number': scats_encoding,  # Use encoded value if available
             'Location': 0,  # Placeholder, will be encoded
             'Hour': time_step.hour,
             'Minute': time_step.minute,

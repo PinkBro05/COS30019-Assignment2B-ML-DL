@@ -97,7 +97,7 @@ class TimeSeriesTrafficFlow:
             raise ValueError(f"Target column '{target_col}' not found in the data.")
         
         # Features to use for training based on available columns
-        base_features = ['SCATS_Number', 'Hour', 'Minute', 'DayOfWeek', 'Site_Type']
+        base_features = ['SCATS_Number', 'Hour', 'Minute', 'DayOfWeek']
         
         # Filter to only include columns that exist in the data
         feature_columns = [col for col in base_features if col in self.data.columns]
