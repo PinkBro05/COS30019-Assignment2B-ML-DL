@@ -74,7 +74,7 @@ class TimeSeriesTrafficFlow:
 
     def prepare_data_for_training(self, target_col='Flow', test_size=0.2, val_size=0.1, 
                                   random_state=42, scale_method='standard',
-                                  sequence_length=4, prediction_horizon=4):
+                                  sequence_length=4, prediction_horizon=4, include_target_as_feature=True):
         """
         Prepare time series data for training.
         
@@ -86,6 +86,7 @@ class TimeSeriesTrafficFlow:
             scale_method: Method to scale data ('standard', 'minmax', or None)
             sequence_length: Number of previous time steps to use as input
             prediction_horizon: Number of time steps ahead to predict
+            include_target_as_feature: Whether to include previous target values as features
             
         Returns:
             Dictionary containing training, validation, and test data
@@ -154,7 +155,8 @@ class TimeSeriesTrafficFlow:
             feature_columns=feature_columns,
             target_col=target_col,
             sequence_length=sequence_length,
-            prediction_horizon=prediction_horizon
+            prediction_horizon=prediction_horizon,
+            include_target_as_feature=include_target_as_feature
         )
         
         if len(sequences) == 0:
@@ -165,6 +167,8 @@ class TimeSeriesTrafficFlow:
         y = np.array([seq['target'] for seq in sequences])
         
         print(f"Created {len(sequences)} sequences with shape: X={X.shape}, y={y.shape}")
+        if include_target_as_feature:
+            print(f"Input features include previous target values ('{target_col}') as the last feature")
         
         # Split data into train, validation, and test
         X_train, X_test, y_train, y_test = train_test_split(
@@ -283,7 +287,7 @@ class TimeSeriesTrafficFlow:
         
         return data
     
-    def _create_sequences(self, data, feature_columns, target_col, sequence_length=4, prediction_horizon=4):
+    def _create_sequences(self, data, feature_columns, target_col, sequence_length=4, prediction_horizon=4, include_target_as_feature=True):
         """
         Create sequences from time series data.
         
@@ -293,6 +297,7 @@ class TimeSeriesTrafficFlow:
             target_col: Target column name
             sequence_length: Number of time steps in each sequence
             prediction_horizon: Steps ahead to predict
+            include_target_as_feature: Whether to include previous target values as features
         
         Returns:
             List of sequence dictionaries with 'features' and 'target'
@@ -323,7 +328,20 @@ class TimeSeriesTrafficFlow:
             
             # Create sequences
             for i in range(len(group_data) - sequence_length - prediction_horizon + 1):
+                # Extract base features for the sequence window
                 feature_seq = features[i:i+sequence_length]
+                
+                # Add previous target values as features if requested
+                if include_target_as_feature:
+                    # Get previous target values that align with the current feature window
+                    prev_targets = targets[i:i+sequence_length].reshape(-1, 1)
+                    
+                    # Combine base features with previous target values
+                    # We need to create a new array with the additional feature
+                    combined_features = np.zeros((sequence_length, feature_seq.shape[1] + 1))
+                    combined_features[:, :-1] = feature_seq  # Copy original features
+                    combined_features[:, -1] = prev_targets.flatten()  # Add target as last feature
+                    feature_seq = combined_features
                 
                 # Extract multiple targets for next prediction_horizon time steps
                 target_values = targets[i+sequence_length:i+sequence_length+prediction_horizon]

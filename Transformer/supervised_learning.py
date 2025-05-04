@@ -29,14 +29,14 @@ def train_model(model, train_loader, val_loader, optimizer, device,
     model.to(device)
     
     # Loss function
-    mse_loss = nn.MSELoss()
+    L1_loss = nn.L1Loss()
     
     # Learning rate scheduler - will reduce LR when validation loss plateaus
     scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
         optimizer, 
         mode='min', 
         factor=0.5,  # Reduce LR by half when plateau is detected
-        patience=patience//2,  # Wait for half the early stopping patience
+        patience=3,
         verbose=True,
         min_lr=1e-6
     )
@@ -68,7 +68,7 @@ def train_model(model, train_loader, val_loader, optimizer, device,
             # Ensure outputs and targets have the right shape for multi-step prediction
             # outputs shape should be [batch_size, output_size] where output_size=4
             # targets shape should be [batch_size, output_size] where output_size=4
-            loss = mse_loss(outputs, targets)
+            loss = L1_loss(outputs, targets)
             
             # Backward pass
             loss.backward()
@@ -87,7 +87,7 @@ def train_model(model, train_loader, val_loader, optimizer, device,
             for inputs, targets in val_loader:
                 inputs, targets = inputs.to(device), targets.to(device)
                 outputs = model(inputs)
-                loss = mse_loss(outputs, targets)
+                loss = L1_loss(outputs, targets)
                 val_loss += loss.item()
         
         # Average loss over batches
@@ -103,8 +103,8 @@ def train_model(model, train_loader, val_loader, optimizer, device,
         
         # Print progress
         print(f'Epoch {epoch+1}/{num_epochs} | '
-              f'Train Loss (MSE): {train_loss:.4f} | '
-              f'Val Loss (MSE): {val_loss:.4f} | '
+              f'Train Loss (L1): {train_loss:.4f} | '
+              f'Val Loss (L1): {val_loss:.4f} | '
               f'LR: {optimizer.param_groups[0]["lr"]:.6f}')
         
         # Check for improvement
@@ -152,7 +152,7 @@ def evaluate_model(model, test_loader, device):
     
     all_preds = []
     all_targets = []
-    mse_loss = nn.MSELoss()
+    L1_loss = nn.L1Loss()
     total_loss = 0.0
     
     with torch.no_grad():
@@ -162,29 +162,29 @@ def evaluate_model(model, test_loader, device):
             # Forward pass
             outputs = model(inputs)
             
-            # MSE loss calculated across all 4 prediction steps
-            loss = mse_loss(outputs, targets)
+            # L1 loss calculated across all 4 prediction steps
+            loss = L1_loss(outputs, targets)
             total_loss += loss.item() * inputs.size(0)
             
             # Store predictions and targets
             all_preds.append(outputs.cpu().numpy())
             all_targets.append(targets.cpu().numpy())
     
-    # Calculate average MSE
+    # Calculate average L1
     avg_loss = total_loss / len(test_loader.dataset)
     
     # Combine all predictions and targets
     all_preds = np.vstack(all_preds)
     all_targets = np.vstack(all_targets)
     
-    # Calculate MSE for each time step
-    step_mse = []
+    # Calculate L1 for each time step
+    step_L1 = []
     for step in range(all_preds.shape[1]):
-        step_mse.append(np.mean((all_preds[:, step] - all_targets[:, step]) ** 2))
+        step_L1.append(np.mean((all_preds[:, step] - all_targets[:, step]) ** 2))
     
     results = {
-        'mse': avg_loss,
-        'step_mse': step_mse,
+        'L1': avg_loss,
+        'step_L1': step_L1,
         'predictions': all_preds,
         'targets': all_targets
     }
@@ -228,6 +228,7 @@ def main():
     argparser.add_argument('--sequence_length', type=int, default=12, help='Length of input sequence (in 15-min intervals)')
     argparser.add_argument('--prediction_horizon', type=int, default=1, help='Number of future time steps to predict')
     argparser.add_argument('--scale_method', type=str, default='standard', choices=['standard', 'minmax', 'none'], help='Data scaling method')
+    argparser.add_argument('--include_target', action='store_true', default=True, help='Include previous target values as features')
     
     # Training parameters
     argparser.add_argument('--batch_size', type=int, default=64, help='Batch size for training')
@@ -250,9 +251,10 @@ def main():
         
         # Prepare data for supervised learning with explicit feature columns
         data = traffic_flow.prepare_data_for_training(
-            sequence_length=args.sequence_length,  # Use 4 time steps as input (1 hour)
-            prediction_horizon=args.prediction_horizon,  # Predict 4 time steps ahead (1 hour)
-            scale_method=args.scale_method  # Standardize data
+            sequence_length=args.sequence_length,  # Use the specified number of time steps as input
+            prediction_horizon=args.prediction_horizon,  # Predict the specified number of time steps ahead
+            scale_method=args.scale_method,  # Specified scaling method
+            include_target_as_feature=args.include_target  # Whether to include previous target values as features
         )
         
         # Show sample data
@@ -309,7 +311,7 @@ def main():
         )
         
         print("\nTraining complete!")
-        print(f"Test MSE: {results['mse']:.4f}")
+        print(f"Test L1: {results['L1']:.4f}")
         
         # Plot training history
         plot_training_history(history)
