@@ -92,7 +92,7 @@ def inference(model, location, time_str, device, data_dict=None):
     
     return predictions
 
-def predict_flow(model_path, location, time_str, device=None):
+def predict_flow(model_path, location, time_str, device=None, d_model=64, num_heads=8, d_ff=256, num_layers=2, dropout=0.1):
     """
     User-friendly function to predict traffic flow for the next 15 minutes
     
@@ -101,6 +101,11 @@ def predict_flow(model_path, location, time_str, device=None):
         location: Tuple of (SCATS Number, Location string)
         time_str: Time string in format "DD/MM/YYYY HH:MM:SS"
         device: Device to run inference on (None for automatic selection)
+        d_model: Hidden dimension size
+        num_heads: Number of attention heads
+        d_ff: Feed-forward layer dimension
+        num_layers: Number of transformer layers
+        dropout: Dropout rate
         
     Returns:
         Dictionary with predictions for the next 15 minutes
@@ -132,12 +137,12 @@ def predict_flow(model_path, location, time_str, device=None):
         # Create model with same architecture as training
         model = TransformerModel(
             input_dim=input_dim,
-            d_model=64,
-            num_heads=8,
-            d_ff=256,
+            d_model=d_model,
+            num_heads=num_heads,
+            d_ff=d_ff,
             output_size=1,
-            num_layers=2,
-            dropout=0.1
+            num_layers=num_layers,
+            dropout=dropout
         )
         
         # Load trained weights
@@ -169,10 +174,22 @@ def main():
     print("="*40)
     
     argparser = argparse.ArgumentParser(description="Traffic Flow Prediction")
-    argparser.add_argument('--model_path', type=str, default='Transformer/save_models/transformer_model_test.pth',)
+    argparser.add_argument('--model_path', type=str, default='Transformer/save_models/transformer_model_test.pth', help='Path to the trained model file')
+    argparser.add_argument('--scats_number', type=int, default=970, help='SCATS number for the location')
+    argparser.add_argument('--location_name', type=str, default="WARRIGAL_RD N of HIGH STREET_RD", help='Location name')
+    argparser.add_argument('--time', type=str, default="10/1/2006 08:00:00", help='Time in DD/MM/YYYY HH:MM:SS format')
+    
+    # Model hyperparameters
+    argparser.add_argument('--d_model', type=int, default=64, help='Hidden dimension size')
+    argparser.add_argument('--num_heads', type=int, default=8, help='Number of attention heads')
+    argparser.add_argument('--d_ff', type=int, default=256, help='Feed-forward layer dimension')
+    argparser.add_argument('--num_layers', type=int, default=2, help='Number of transformer layers')
+    argparser.add_argument('--dropout', type=float, default=0.1, help='Dropout rate')
+    
+    args = argparser.parse_args()
     
     # Path to the trained model
-    model_path = argparser.parse_args().model_path
+    model_path = args.model_path
     
     # Check if the model file exists
     if not os.path.exists(model_path):
@@ -185,10 +202,10 @@ def main():
     print(f"Using device: {device}")
     
     # Example location (SCATS number, location name)
-    location = (970, "WARRIGAL_RD N of HIGH STREET_RD")
+    location = (args.scats_number, args.location_name)
     
     # Example time (format: DD/MM/YYYY HH:MM:SS)
-    time_str = "10/1/2006 08:00:00"
+    time_str = args.time
     
     print(f"\nPredicting traffic flow for:")
     print(f"Location: {location[1]} (SCATS #{location[0]})")
@@ -200,7 +217,12 @@ def main():
             model_path=model_path,
             location=location,
             time_str=time_str,
-            device=device
+            device=device,
+            d_model=args.d_model,
+            num_heads=args.num_heads,
+            d_ff=args.d_ff,
+            num_layers=args.num_layers,
+            dropout=args.dropout
         )
         
         # Display results

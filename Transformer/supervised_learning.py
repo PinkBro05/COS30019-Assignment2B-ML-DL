@@ -181,7 +181,26 @@ def plot_training_history(history):
 
 def main():
     argparser = argparse.ArgumentParser(description="Train a Transformer model for traffic flow prediction")
+    # Model saving parameters
     argparser.add_argument('--save_id', type=str, default='test', help='ID for saving the model')
+    
+    # Data parameters
+    argparser.add_argument('--sequence_length', type=int, default=12, help='Length of input sequence (in 15-min intervals)')
+    argparser.add_argument('--prediction_horizon', type=int, default=1, help='Number of future time steps to predict')
+    argparser.add_argument('--scale_method', type=str, default='standard', choices=['standard', 'minmax', 'none'], help='Data scaling method')
+    
+    # Training parameters
+    argparser.add_argument('--batch_size', type=int, default=64, help='Batch size for training')
+    argparser.add_argument('--learning_rate', type=float, default=0.001, help='Learning rate for optimizer')
+    argparser.add_argument('--num_epochs', type=int, default=15, help='Maximum number of training epochs')
+    argparser.add_argument('--patience', type=int, default=3, help='Early stopping patience')
+    
+    # Model hyperparameters
+    argparser.add_argument('--d_model', type=int, default=64, help='Hidden dimension size')
+    argparser.add_argument('--num_heads', type=int, default=8, help='Number of attention heads')
+    argparser.add_argument('--d_ff', type=int, default=256, help='Feed-forward layer dimension')
+    argparser.add_argument('--num_layers', type=int, default=2, help='Number of transformer layers')
+    argparser.add_argument('--dropout', type=float, default=0.1, help='Dropout rate')
     
     args = argparser.parse_args()
     
@@ -191,28 +210,28 @@ def main():
         
         # Prepare data for supervised learning with explicit feature columns
         data = traffic_flow.prepare_data_for_training(
-            sequence_length=12,  # Use 4 time steps as input (1 hour)
-            prediction_horizon=1,  # Predict 4 time steps ahead (1 hour)
-            scale_method='standard'  # Standardize data
+            sequence_length=args.sequence_length,  # Use 4 time steps as input (1 hour)
+            prediction_horizon=args.prediction_horizon,  # Predict 4 time steps ahead (1 hour)
+            scale_method=args.scale_method  # Standardize data
         )
         
         # Show sample data
-        # show_sample_data(data)
+        show_sample_data(data)
         
         # Create DataLoaders
-        batch_size = 64
+        batch_size = args.batch_size
         dataloaders = create_time_series_dataloaders(data, batch_size=batch_size)
         
         # Get input dimensionality from data
         input_dim = data['X_train'].shape[-1]  # Number of features
         
         # Initialize model
-        d_model = 64  # Hidden dimension
-        num_heads = 8  # Number of attention heads
-        d_ff = 256  # Feed-forward layer dimension
-        num_layers = 2  # Number of transformer layers
+        d_model = args.d_model  # Hidden dimension
+        num_heads = args.num_heads  # Number of attention heads
+        d_ff = args.d_ff  # Feed-forward layer dimension
+        num_layers = args.num_layers  # Number of transformer layers
         output_size = 1  # Predicting next 1 time steps 
-        dropout = 0.1
+        dropout = args.dropout
         
         model = TransformerModel(
             input_dim=input_dim,
@@ -225,7 +244,7 @@ def main():
         )
         
         # Setup training
-        learning_rate = 0.001
+        learning_rate = args.learning_rate
         device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
         optimizer = torch.optim.Adam(model.parameters(), lr=learning_rate)
         
@@ -237,8 +256,8 @@ def main():
             val_loader=dataloaders['val'],
             optimizer=optimizer,
             device=device,
-            num_epochs=15,
-            patience=3,
+            num_epochs=args.num_epochs,
+            patience=args.patience,
         )
         
         # Evaluate model

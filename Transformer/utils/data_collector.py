@@ -13,9 +13,9 @@ class TimeSeriesTrafficFlow:
     This class works with data in the format where each row represents a single 15-minute interval.
     
     The expected format is:
-    Date SCATS Number Location CD_MELWAY HF VicRoads Internal VR Internal Stat Flow
-    10/1/2006 00:00 0970 WARRIGAL_RD N of HIGH STREET_RD 060 G10 249 182 16
-    10/1/2006 00:15 0970 WARRIGAL_RD N of HIGH STREET_RD 060 G10 249 182 24
+    Date,SCATS_Number,Flow,Site_Type
+    2006-10-01 00:00:00,2000,365,INT
+    2006-10-01 00:15:00,2000,315,INT
     ...
     """
     def __init__(self, data_path):
@@ -45,8 +45,6 @@ class TimeSeriesTrafficFlow:
                 self.data['Minute'] = self.data['DateTime'].dt.minute
                 self.data['DayOfWeek'] = self.data['DateTime'].dt.dayofweek
                 self.data['Day'] = self.data['DateTime'].dt.day
-                self.data['Month'] = self.data['DateTime'].dt.month
-                self.data['Year'] = self.data['DateTime'].dt.year
                 
                 print("Successfully processed datetime information.")
             except Exception as e:
@@ -61,12 +59,18 @@ class TimeSeriesTrafficFlow:
         if self.data.isnull().values.any():
             print("Missing values found. Filling with k nearest neighbors...")
             
-            # Initialize KNN imputer
-            imputer = KNNImputer(n_neighbors=4)
+            # Get only numeric columns for imputation
+            numeric_cols = self.data.select_dtypes(include=[np.number]).columns.tolist()
             
-            # Impute missing values
-            self.data.iloc[:, :] = imputer.fit_transform(self.data)
-            print("Missing values filled.")
+            if numeric_cols:
+                # Initialize KNN imputer
+                imputer = KNNImputer(n_neighbors=4)
+                
+                # Impute missing values only for numeric columns
+                self.data[numeric_cols] = imputer.fit_transform(self.data[numeric_cols])
+                print(f"Missing values filled for numeric columns: {numeric_cols}")
+        else:
+            print("No missing values found.")
 
     def prepare_data_for_training(self, target_col='Flow', test_size=0.2, val_size=0.1, 
                                   random_state=42, scale_method='standard',
@@ -92,31 +96,57 @@ class TimeSeriesTrafficFlow:
         if target_col not in self.data.columns:
             raise ValueError(f"Target column '{target_col}' not found in the data.")
         
-        # Features to use for training, using DayofWeek since the traffic flow offten cycles weekly (common sense)
-        feature_columns = [
-            'SCATS Number', 'Location', 'Hour', 'Minute', 'DayOfWeek'
-        ]
+        # Features to use for training based on available columns
+        base_features = ['SCATS_Number', 'Hour', 'Minute', 'DayOfWeek', 'Site_Type']
         
-        # Filter to only include columns that exist
-        feature_columns = [col for col in feature_columns if col in self.data.columns]
+        # Filter to only include columns that exist in the data
+        feature_columns = [col for col in base_features if col in self.data.columns]
         
         # Ensure we have at least some features
         if not feature_columns:
             raise ValueError("No valid feature columns found in the data.")
         
-        # Convert categorical features to numeric
+        print(f"Using feature columns: {feature_columns}")
+        
+        # Make a copy of the data for processing
         data_processed = self.data.copy()
-        categorical_columns = ['SCATS Number', 'Location', 'CD_MELWAY']
+        
+        # Clean the data first - apply to data_processed, not self.data
+        print("Cleaning data...")
+        if data_processed.isnull().values.any():
+            print("Missing values found. Filling with appropriate methods...")
+            
+            # Get only numeric columns for imputation
+            numeric_cols = data_processed.select_dtypes(include=[np.number]).columns.tolist()
+            
+            if numeric_cols:
+                # Initialize KNN imputer
+                imputer = KNNImputer(n_neighbors=4)
+                
+                # Impute missing values only for numeric columns
+                data_processed[numeric_cols] = imputer.fit_transform(data_processed[numeric_cols])
+                print(f"Missing values filled for numeric columns: {numeric_cols}")
+            
+            # For non-numeric columns with missing values, use forward fill
+            non_numeric_cols = [col for col in data_processed.columns if col not in numeric_cols and data_processed[col].isnull().any()]
+            if non_numeric_cols:
+                print(f"Using forward fill for non-numeric columns: {non_numeric_cols}")
+                data_processed[non_numeric_cols] = data_processed[non_numeric_cols].fillna(method='ffill')
+                # Also backward fill in case there are still NaN values at the beginning
+                data_processed[non_numeric_cols] = data_processed[non_numeric_cols].fillna(method='bfill')
+        else:
+            print("No missing values found.")
+        
+        # Convert categorical features to numeric
+        categorical_columns = ['SCATS_Number', 'Site_Type']
         for col in categorical_columns:
             if col in data_processed.columns:
                 data_processed[col] = pd.Categorical(data_processed[col]).codes
-
-        # Clean the data
-        self.clean_data()
-
+        
         # Check for missing values after cleaning
         if data_processed.isnull().values.any():
-            raise ValueError("Data still contains missing values after cleaning.")
+            missing_cols = [col for col in data_processed.columns if data_processed[col].isnull().any()]
+            raise ValueError(f"Data still contains missing values after cleaning in columns: {missing_cols}")
         
         # Create sequences of data
         sequences = self._create_sequences(
@@ -265,15 +295,15 @@ class TimeSeriesTrafficFlow:
             prediction_horizon: Steps ahead to predict
         
         Returns:
-            List of sequence dictionaries with 'features' and 'target', the sequence overlap 3 time frames
+            List of sequence dictionaries with 'features' and 'target'
         """
         sequences = []
         
-        # Group data by location and date to ensure we're working with continuous data
-        if 'Location' in data.columns and 'Date_Only' in data.columns:
-            groups = data.groupby(['Location', 'Date_Only'])
-        elif 'Location' in data.columns:
-            groups = data.groupby(['Location'])
+        # Group data by SCATS_Number and date to ensure we're working with continuous data
+        if 'SCATS_Number' in data.columns and 'Date_Only' in data.columns:
+            groups = data.groupby(['SCATS_Number', 'Date_Only'])
+        elif 'SCATS_Number' in data.columns:
+            groups = data.groupby(['SCATS_Number'])
         else:
             # If we don't have grouping columns, treat all data as one group
             groups = [(None, data)]
@@ -295,7 +325,7 @@ class TimeSeriesTrafficFlow:
             for i in range(len(group_data) - sequence_length - prediction_horizon + 1):
                 feature_seq = features[i:i+sequence_length]
                 
-                # Extract multiple targets for next 4 time steps (1 hour)
+                # Extract multiple targets for next prediction_horizon time steps
                 target_values = targets[i+sequence_length:i+sequence_length+prediction_horizon]
                 
                 sequences.append({
@@ -362,21 +392,41 @@ def create_dataloaders(data, batch_size=32):
 
 def load_time_series_data():
     """
-    Load the transformed time series data.
+    Load the time series traffic flow data from the final_scats_data.csv file.
     
     Returns:
         TimeSeriesTrafficFlow object
     """
-    # Try different paths to find the transformed data
-    data_path = '../Data/Transformed/transformed_scats_data.csv'
-    if not os.path.exists(data_path):
-        data_path = 'Data/Transformed/transformed_scats_data.csv'
+    # Try different paths to find the final data
+    possible_paths = [
+        '../Data/Transformed/final_scats_data.csv',
+        'Data/Transformed/final_scats_data.csv'
+    ]
     
-    # Check if the file exists
-    if not os.path.exists(data_path):
-        raise FileNotFoundError(f"Could not find transformed data at {data_path}")
+    # Try each path until we find a file that exists
+    data_path = None
+    for path in possible_paths:
+        if os.path.exists(path):
+            data_path = path
+            break
     
-    # Load the data
+    if data_path is None:
+        # Fall back to transformed data if final data is not found
+        fallback_paths = [
+            '../Data/Transformed/transformed_scats_data.csv',
+            'Data/Transformed/transformed_scats_data.csv'
+        ]
+        for path in fallback_paths:
+            if os.path.exists(path):
+                data_path = path
+                print(f"Warning: Could not find final_scats_data.csv, falling back to {path}")
+                break
+    
+    # Check if any file was found
+    if data_path is None:
+        raise FileNotFoundError("Could not find either final_scats_data.csv or transformed_scats_data.csv")
+    
+    print(f"Loading data from {data_path}")
     traffic_flow = TimeSeriesTrafficFlow(data_path)
     return traffic_flow
 
@@ -498,10 +548,3 @@ def time_series_data_example():
     except Exception as e:
         print(f"Error preparing time series data: {e}")
         return None, None
-
-def main():
-    # Example usage of the time series data preparation
-    data, dataloaders = time_series_data_example()
-        
-if __name__ == "__main__":
-    main()
