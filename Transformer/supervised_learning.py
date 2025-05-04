@@ -191,8 +191,8 @@ def main():
         
         # Prepare data for supervised learning with explicit feature columns
         data = traffic_flow.prepare_data_for_training(
-            sequence_length=4,  # Use 4 time steps as input (1 hour)
-            prediction_horizon=4,  # Predict 4 time steps ahead (1 hour)
+            sequence_length=12,  # Use 4 time steps as input (1 hour)
+            prediction_horizon=1,  # Predict 4 time steps ahead (1 hour)
             scale_method='standard'  # Standardize data
         )
         
@@ -211,7 +211,7 @@ def main():
         num_heads = 8  # Number of attention heads
         d_ff = 256  # Feed-forward layer dimension
         num_layers = 2  # Number of transformer layers
-        output_size = 4  # Predicting next 4 time steps (1 hour)
+        output_size = 1  # Predicting next 1 time steps 
         dropout = 0.1
         
         model = TransformerModel(
@@ -237,8 +237,8 @@ def main():
             val_loader=dataloaders['val'],
             optimizer=optimizer,
             device=device,
-            num_epochs=30,
-            patience=10,
+            num_epochs=15,
+            patience=3,
         )
         
         # Evaluate model

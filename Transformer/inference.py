@@ -7,7 +7,7 @@ import os
 import argparse
 
 def inference(model, location, time_str, device, data_dict=None):
-    """ Predicting next 1 hour traffic flow from given time and location
+    """ Predicting next 1 time step (15 mins) traffic flow from given time and location
 
     Args:
         model: Trained TransformerModel
@@ -17,7 +17,7 @@ def inference(model, location, time_str, device, data_dict=None):
         data_dict: Dictionary containing scalers and feature information
 
     Returns:
-        List of predicted flow values for the next 4 time frames (1 hour)
+        List of predicted flow value for the next time step (15 mins)
     """
     model.to(device)
     model.eval()
@@ -32,20 +32,20 @@ def inference(model, location, time_str, device, data_dict=None):
         print("Error: Time format should be DD/MM/YYYY HH:MM:SS")
         return None
     
-    # Create features for the next 4 time frames
+    # Create features for the next time frame
     predictions = []
     
     # Get feature columns from data_dict if available
     feature_columns = data_dict.get('feature_columns', 
                                    ['SCATS Number', 'Location', 'Hour', 'Minute', 'DayOfWeek'])
     
-    # Create a sequence of 4 time steps (15-min intervals) as input
+    # Create a sequence of 12 time steps (15-min intervals) as input
     sequence_data = []
     current_time = dt
     
-    # Create a sequence of the current time and the 3 previous 15-minute intervals
-    for i in range(4):
-        time_step = current_time - datetime.timedelta(minutes=(3-i)*15)
+    # Create a sequence of the current time and the 11 previous 15-minute intervals
+    for i in range(12):
+        time_step = current_time - datetime.timedelta(minutes=(11-i)*15)
         
         # Extract features
         features = {
@@ -83,21 +83,18 @@ def inference(model, location, time_str, device, data_dict=None):
         scaler_y = data_dict['scalers']['y']
         predicted_values = scaler_y.inverse_transform(predicted_values.reshape(-1, 1)).flatten()
     
-    # Create a list of predictions with timestamps
-    next_time = dt
-    
-    for i in range(4):  # 4 predictions for the next hour
-        next_time = next_time + datetime.timedelta(minutes=15)
-        predictions.append({
-            'time': next_time.strftime("%H:%M:%S"),
-            'flow': round(float(predicted_values[i]), 1)
-        })
+    # Create a prediction with timestamp
+    next_time = dt + datetime.timedelta(minutes=15)
+    predictions.append({
+        'time': next_time.strftime("%H:%M:%S"),
+        'flow': round(float(predicted_values[0]), 1)
+    })
     
     return predictions
 
 def predict_flow(model_path, location, time_str, device=None):
     """
-    User-friendly function to predict traffic flow for the next hour
+    User-friendly function to predict traffic flow for the next 15 minutes
     
     Args:
         model_path: Path to the trained model file
@@ -106,7 +103,7 @@ def predict_flow(model_path, location, time_str, device=None):
         device: Device to run inference on (None for automatic selection)
         
     Returns:
-        Dictionary with predictions for the next hour
+        Dictionary with predictions for the next 15 minutes
     """
     if device is None:
         device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
@@ -115,8 +112,8 @@ def predict_flow(model_path, location, time_str, device=None):
     try:
         traffic_flow = load_time_series_data()
         data = traffic_flow.prepare_data_for_training(
-            sequence_length=4,
-            prediction_horizon=4,
+            sequence_length=12,
+            prediction_horizon=1,
             scale_method='standard'
         )
     except Exception as e:
@@ -138,7 +135,7 @@ def predict_flow(model_path, location, time_str, device=None):
             d_model=64,
             num_heads=8,
             d_ff=256,
-            output_size=4,
+            output_size=1,
             num_layers=2,
             dropout=0.1
         )
@@ -191,7 +188,7 @@ def main():
     location = (970, "WARRIGAL_RD N of HIGH STREET_RD")
     
     # Example time (format: DD/MM/YYYY HH:MM:SS)
-    time_str = "23/04/2025 00:00:00"
+    time_str = "10/1/2006 08:00:00"
     
     print(f"\nPredicting traffic flow for:")
     print(f"Location: {location[1]} (SCATS #{location[0]})")
@@ -211,7 +208,7 @@ def main():
             print("Prediction Results:")
             print(f"Location: {result['location'][1]} (SCATS #{result['location'][0]})")
             print(f"Reference time: {result['prediction_time']}")
-            print("\nPredicted traffic flow for the next hour:")
+            print("\nPredicted traffic flow for the next 15 minutes:")
             
             for i, pred in enumerate(result['predictions']):
                 print(f"{pred['time']}: {pred['flow']} vehicles")
