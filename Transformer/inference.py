@@ -1,395 +1,217 @@
-from models.vanila_encoder import TransformerModel
-from utils.data_collector import load_time_series_data
+import os
 import torch
 import numpy as np
-import datetime
-import os
+import matplotlib.pyplot as plt
+import sys
+import random
 import argparse
-import pandas as pd
+from datetime import datetime, timedelta
 
-def inference(model, scats_number, time_str, device, data_dict=None):
-    """ Predicting next 1 time step (15 mins) traffic flow from given time and location
+# Add parent directory to path to import from utils
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from utils.traffic_data_collector import TrafficDataCollector
+from models.model import Transformer
 
+def load_model(model_path, model_params, device):
+    """Load a trained Transformer model.
+    
     Args:
-        model: Trained TransformerModel
-        scats_number: SCATS Number for the location
-        time_str: Time string in format "DD/MM/YYYY HH:MM:SS"
-        device: Device to evaluate on
-        data_dict: Dictionary containing scalers and feature information
-
+        model_path: Path to the saved model
+        model_params: Dictionary with model parameters
+        device: Device to load the model on
+        
     Returns:
-        List of predicted flow value for the next time step (15 mins)
+        Loaded model
     """
+    model = Transformer(
+        input_dim=model_params['input_dim'],
+        output_dim=model_params['output_dim'],
+        d_model=model_params['d_model'],
+        nhead=model_params['nhead'],
+        num_encoder_layers=model_params['num_encoder_layers'],
+        num_decoder_layers=model_params['num_decoder_layers'],
+        dim_feedforward=model_params['dim_feedforward'],
+        dropout=model_params['dropout'],
+        seq_length=model_params['seq_length'],
+        pred_length=model_params['pred_length']
+    )
+    
+    model.load_state_dict(torch.load(model_path, map_location=device))
     model.to(device)
     model.eval()
     
-    # Parse time string to datetime
-    try:
-        dt = datetime.datetime.strptime(time_str, "%d/%m/%Y %H:%M:%S")
-    except ValueError:
-        print("Error: Time format should be DD/MM/YYYY HH:MM:SS")
-        return None
-    
-    # Create features for the next time frame
-    predictions = []
-    
-    # Get feature columns from data_dict if available
-    feature_columns = data_dict.get('feature_columns', 
-                                   ['SCATS_Number', 'Hour', 'Minute', 'DayOfWeek'])
-    
-    # Get an estimate of average flow for fallback purposes
-    estimated_flow = 100.0  # Default fallback value
-    if data_dict and 'original_data' in data_dict:
-        try:
-            # Try to find the average flow at this time of day and day of week
-            original_data = data_dict['original_data']
-            day_of_week = dt.weekday()
-            hour = dt.hour
-            
-            # Filter data for this SCATS number, hour, and day of week
-            similar_data = original_data[
-                (original_data['SCATS_Number'] == scats_number) & 
-                (original_data['DayOfWeek'] == day_of_week) & 
-                (original_data['Hour'] == hour)
-            ]
-            
-            if not similar_data.empty and 'Flow' in similar_data.columns:
-                # Use the average flow as our estimate
-                estimated_flow = similar_data['Flow'].mean()
-                print(f"Using estimated flow of {estimated_flow:.1f} based on historical data")
-            else:
-                # If no data for this specific time, use overall average
-                all_flows = original_data[original_data['SCATS_Number'] == scats_number]['Flow']
-                if not all_flows.empty:
-                    estimated_flow = all_flows.mean()
-                    print(f"Using general average flow of {estimated_flow:.1f}")
-        except Exception as e:
-            print(f"Error estimating flow: {e}")
-    
-    # Create a sequence of 12 time steps (15-min intervals) as input
-    sequence_data = []
-    current_time = dt
-    
-    # If we have the training data, get the categorical encodings for SCATS_Number
-    scats_encoding = None
-    if data_dict and 'original_data' in data_dict:
-        # Get the mapping of SCATS numbers to their encoded values
-        try:
-            original_data = data_dict['original_data']
-            if 'SCATS_Number' in original_data.columns:
-                # Find the corresponding encoded value for this SCATS number
-                scats_data = original_data[original_data['SCATS_Number'] == scats_number]
-                if not scats_data.empty:
-                    # Use the first encoded value found
-                    scats_encoding = pd.Categorical(scats_data['SCATS_Number']).codes[0]
-                else:
-                    # Default fallback if this SCATS number wasn't in training
-                    print(f"Warning: SCATS number {scats_number} not found in training data")
-                    # Use the raw value, which might cause issues
-                    scats_encoding = scats_number
-        except Exception as e:
-            print(f"Warning: Could not encode SCATS number: {e}")
-            # Fallback to using the raw value
-            scats_encoding = scats_number
-    else:
-        # No data dictionary available, use raw value
-        scats_encoding = scats_number
-    
-    # Create a sequence of the current time and the 11 previous 15-minute intervals
-    sequence_times = []
-    for i in range(12):
-        time_step = current_time - datetime.timedelta(minutes=(11-i)*15)
-        sequence_times.append(time_step)
-    
-    # If we have the original data, try to find actual Flow values for these times
-    actual_flows = [None] * 12  # Initialize with None values
-    
-    if data_dict and 'original_data' in data_dict:
-        try:
-            original_data = data_dict['original_data']
-            
-            # Make sure we have DateTime column to match by time
-            if 'DateTime' not in original_data.columns and 'Date' in original_data.columns:
-                # Convert 'Date' column to datetime if it's not already
-                original_data['DateTime'] = pd.to_datetime(original_data['Date'])
-            
-            # Process each time in our sequence
-            for i, seq_time in enumerate(sequence_times):
-                # Find data points closest to each sequence time
-                matching_data = original_data[
-                    (original_data['SCATS_Number'] == scats_number) & 
-                    (original_data['DateTime'].dt.date == seq_time.date()) &
-                    (original_data['DateTime'].dt.hour == seq_time.hour) &
-                    (original_data['DateTime'].dt.minute == seq_time.minute)
-                ]
-                
-                if not matching_data.empty and 'Flow' in matching_data.columns:
-                    # Use the actual Flow value
-                    actual_flows[i] = matching_data['Flow'].values[0]
-                    print(f"Found actual flow ({actual_flows[i]}) for {seq_time}")
-            
-            # Fill in any missing values with estimates
-            for i in range(len(actual_flows)):
-                if actual_flows[i] is None:
-                    # If we don't have an actual value, try to estimate based on similar time patterns
-                    time_step = sequence_times[i]
-                    day_of_week = time_step.weekday()
-                    hour = time_step.hour
-                    minute = time_step.minute
-                    
-                    # Try to find data for the same SCATS, day of week, hour, and minute
-                    similar_data = original_data[
-                        (original_data['SCATS_Number'] == scats_number) & 
-                        (original_data['DayOfWeek'] == day_of_week) & 
-                        (original_data['Hour'] == hour) &
-                        (original_data['Minute'] == minute)
-                    ]
-                    
-                    if not similar_data.empty and 'Flow' in similar_data.columns:
-                        # Use the average flow for this specific time slot
-                        actual_flows[i] = similar_data['Flow'].mean()
-                        print(f"Using similar time flow ({actual_flows[i]:.1f}) for {time_step}")
-                    else:
-                        # Try with just hour
-                        similar_hour_data = original_data[
-                            (original_data['SCATS_Number'] == scats_number) & 
-                            (original_data['DayOfWeek'] == day_of_week) & 
-                            (original_data['Hour'] == hour)
-                        ]
-                        
-                        if not similar_hour_data.empty and 'Flow' in similar_hour_data.columns:
-                            actual_flows[i] = similar_hour_data['Flow'].mean()
-                            print(f"Using same hour flow ({actual_flows[i]:.1f}) for {time_step}")
-                        else:
-                            # Last resort - use overall average
-                            actual_flows[i] = estimated_flow
-                            print(f"Using estimated flow ({estimated_flow:.1f}) for {time_step}")
-            
-            print(f"Using actual/estimated flow values for sequence: {[round(f, 1) if f is not None else None for f in actual_flows]}")
-            
-        except Exception as e:
-            print(f"Error finding actual flow values: {e}")
-            # Fall back to using estimated flow for all time steps
-            actual_flows = [estimated_flow] * 12
-            print(f"Using default flow value of {estimated_flow:.1f} for all time steps")
-    else:
-        # No data dictionary available, use default for all time steps
-        actual_flows = [estimated_flow] * 12
-        print(f"Using default flow value of {estimated_flow:.1f} for all time steps (no historical data available)")
-    
-    # Create sequence data with actual or estimated flow values
-    for i in range(12):
-        time_step = sequence_times[i]
-        
-        # Extract features
-        features = {
-            'SCATS_Number': scats_encoding,
-            'Hour': time_step.hour,
-            'Minute': time_step.minute,
-            'DayOfWeek': time_step.weekday()
-        }
-        
-        # Keep only the features mentioned in feature_columns
-        features = {k: features[k] for k in feature_columns if k in features}
-        
-        # Add to sequence - convert dict to list in the order of feature_columns
-        feature_values = [features[col] for col in feature_columns if col in features]
-        
-        # Add the actual/estimated flow as an additional feature if the model was trained with it
-        # Check if our model expects flow as a feature by examining input dimension
-        include_target_as_feature = False
-        if data_dict and 'X_train' in data_dict:
-            # If X_train has more features than our feature_columns, 
-            # it likely includes the target as a feature
-            expected_num_features = data_dict['X_train'].shape[-1]
-            if expected_num_features > len(feature_values):
-                include_target_as_feature = True
-                feature_values.append(actual_flows[i])
-        
-        sequence_data.append(feature_values)
-    
-    # Convert to numpy array
-    input_sequence = np.array(sequence_data)
-    
-    # Scale features if scalers are available
-    if data_dict and 'scalers' in data_dict and data_dict['scalers'] is not None:
-        scaler_X = data_dict['scalers']['X']
-        input_sequence = scaler_X.transform(input_sequence)
-    
-    # Convert to PyTorch tensor and add batch dimension
-    input_tensor = torch.tensor(input_sequence, dtype=torch.float32).unsqueeze(0).to(device)
-    
-    # Perform inference
-    with torch.no_grad():
-        output = model(input_tensor)
-        predicted_values = output.cpu().numpy()[0]  # Remove batch dimension
-    
-    # Inverse transform if scalers are available
-    if data_dict and 'scalers' in data_dict and data_dict['scalers'] is not None:
-        scaler_y = data_dict['scalers']['y']
-        predicted_values = scaler_y.inverse_transform(predicted_values.reshape(-1, 1)).flatten()
-    
-    # Create a prediction with timestamp
-    next_time = dt + datetime.timedelta(minutes=15)
-    predictions.append({
-        'time': next_time.strftime("%H:%M:%S"),
-        'flow': round(float(predicted_values[0]), 1)
-    })
-    
-    return predictions
+    return model
 
-def predict_flow(model_path, scats_number, time_str, device=None, d_model=64, num_heads=8, d_ff=256, num_layers=2, dropout=0.1):
-    """
-    User-friendly function to predict traffic flow for the next 15 minutes
+def predict(model, input_seq, device):
+    """Make a prediction using the Transformer model.
     
     Args:
-        model_path: Path to the trained model file
-        scats_number: SCATS Number for the location
-        time_str: Time string in format "DD/MM/YYYY HH:MM:SS"
-        device: Device to run inference on (None for automatic selection)
-        d_model: Hidden dimension size
-        num_heads: Number of attention heads
-        d_ff: Feed-forward layer dimension
-        num_layers: Number of transformer layers
-        dropout: Dropout rate
+        model: Trained Transformer model
+        input_seq: Input sequence (shape: [batch_size, seq_length, input_dim])
+        device: Device to run the prediction on
         
     Returns:
-        Dictionary with predictions for the next 15 minutes
+        Predicted sequence (shape: [batch_size, pred_length, output_dim])
     """
-    if device is None:
-        device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+    model.eval()
+    with torch.no_grad():
+        input_tensor = torch.FloatTensor(input_seq).to(device)
+        output = model(input_tensor)
     
-    # Load data to get scalers and feature info
-    try:
-        traffic_flow = load_time_series_data()
-        data = traffic_flow.prepare_data_for_training(
-            sequence_length=12,
-            prediction_horizon=1,
-            scale_method='standard',
-            include_target_as_feature=True  # Include previous Flow values as features
-        )
-        # Store original data for proper categorical encoding
-        data['original_data'] = traffic_flow.data
-    except Exception as e:
-        print(f"Warning: Could not load training data for scaling: {e}")
-        print("Predictions will not be properly scaled.")
-        data = None
-    
-    # Load model
-    try:
-        # Get input dimensionality
-        if data:
-            input_dim = data['X_train'].shape[-1]
-        else:
-            input_dim = 4  # Default: SCATS Number, Hour, Minute, DayOfWeek
-        
-        # Create model with same architecture as training
-        model = TransformerModel(
-            input_dim=input_dim,
-            d_model=d_model,
-            num_heads=num_heads,
-            d_ff=d_ff,
-            output_size=1,
-            num_layers=num_layers,
-            dropout=dropout
-        )
-        
-        # Load trained weights
-        model.load_state_dict(torch.load(model_path, map_location=device))
-        model.to(device)
-        model.eval()
-        
-    except Exception as e:
-        print(f"Error loading model: {e}")
-        return None
-    
-    # Run inference
-    predictions = inference(model, scats_number, time_str, device, data)
-    
-    # Format results
-    result = {
-        'scats_number': scats_number,
-        'prediction_time': time_str,
-        'predictions': predictions
-    }
-    
-    return result
+    return output.cpu().numpy()
 
-def main():
+def plot_prediction(true_seq, pred_seq, site_id, date, scaler, feature_idx=0, time_interval=15):
+    """Plot the true and predicted sequences.
+    
+    Args:
+        true_seq: True sequence (shape: [pred_length, output_dim])
+        pred_seq: Predicted sequence (shape: [pred_length, output_dim])
+        site_id: Traffic site ID
+        date: Date of the sequence
+        scaler: Dictionary with normalization parameters
+        feature_idx: Index of the feature to plot
+        time_interval: Time interval in minutes
     """
-    Example usage of the traffic flow prediction model.
-    """
-    print("Traffic Flow Prediction Example")
-    print("="*40)
+    # Get the prediction length
+    pred_length = true_seq.shape[0]
     
-    argparser = argparse.ArgumentParser(description="Traffic Flow Prediction")
-    argparser.add_argument('--model_path', type=str, default='Transformer/save_models/transformer_model_test.pth', help='Path to the trained model file')
-    argparser.add_argument('--scats_number', type=int, default=970, help='SCATS number for the location')
-    argparser.add_argument('--time', type=str, default="10/1/2006 08:00:00", help='Time in DD/MM/YYYY HH:MM:SS format')
+    # Inverse transform the sequences
+    data_collector = TrafficDataCollector()
+    true_seq_orig = data_collector.inverse_transform(true_seq, scaler, is_target=True)
+    pred_seq_orig = data_collector.inverse_transform(pred_seq, scaler, is_target=True)
     
-    # Model hyperparameters
-    argparser.add_argument('--d_model', type=int, default=64, help='Hidden dimension size')
-    argparser.add_argument('--num_heads', type=int, default=8, help='Number of attention heads')
-    argparser.add_argument('--d_ff', type=int, default=256, help='Feed-forward layer dimension')
-    argparser.add_argument('--num_layers', type=int, default=2, help='Number of transformer layers')
-    argparser.add_argument('--dropout', type=float, default=0.1, help='Dropout rate')
+    # Extract the specified feature
+    true_values = true_seq_orig[:, feature_idx]
+    pred_values = pred_seq_orig[:, feature_idx]
     
-    args = argparser.parse_args()
+    # Create time points for x-axis
+    start_time = datetime.strptime('00:00', '%H:%M')
+    time_points = [(start_time + timedelta(minutes=i*time_interval)).strftime('%H:%M') 
+                   for i in range(pred_length)]
     
-    # Path to the trained model
-    model_path = args.model_path
+    # Create the plot
+    plt.figure(figsize=(10, 6))
+    plt.plot(time_points, true_values, 'b-', marker='o', label='Actual Traffic Flow')
+    plt.plot(time_points, pred_values, 'r-', marker='x', label='Predicted Traffic Flow')
+    plt.xlabel('Time')
+    plt.ylabel('Traffic Flow Volume')
+    plt.title(f'Traffic Flow Prediction for Site {site_id} on {date}')
+    plt.xticks(rotation=45)
+    plt.grid(True)
+    plt.legend()
+    plt.tight_layout()
     
-    # Check if the model file exists
-    if not os.path.exists(model_path):
-        print(f"Error: Model file not found at {model_path}")
-        print("Please make sure you've trained the model first.")
-        return
+    # Save the plot
+    plot_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'predictions')
+    os.makedirs(plot_dir, exist_ok=True)
+    plt.savefig(os.path.join(plot_dir, f'prediction_site{site_id}_{date}.png'))
+    plt.show()
     
-    # Specify device (use GPU if available)
-    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+    # Calculate evaluation metrics
+    mae = np.mean(np.abs(true_values - pred_values))
+    mape = np.mean(np.abs((true_values - pred_values) / (true_values + 1e-5))) * 100
+    rmse = np.sqrt(np.mean(np.square(true_values - pred_values)))
+    
+    print(f"Evaluation Metrics for Site {site_id} on {date}:")
+    print(f"  MAE: {mae:.2f}")
+    print(f"  MAPE: {mape:.2f}%")
+    print(f"  RMSE: {rmse:.2f}")
+
+def main(args):
+    # Set device
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(f"Using device: {device}")
     
-    # SCATS number for prediction
-    scats_number = args.scats_number
+    # Set random seeds for reproducibility
+    torch.manual_seed(42)
+    np.random.seed(42)
+    random.seed(42)
     
-    # Example time (format: DD/MM/YYYY HH:MM:SS)
-    time_str = args.time
+    # Model parameters (should match trained model)
+    model_params = {
+        'input_dim': None,  # Will be set from data
+        'output_dim': None,  # Will be set from data
+        'd_model': 64,
+        'nhead': 8,
+        'num_encoder_layers': 3,
+        'num_decoder_layers': 3,
+        'dim_feedforward': 256,
+        'dropout': 0.1,
+        'seq_length': 24,
+        'pred_length': 4
+    }
     
-    print(f"\nPredicting traffic flow for:")
-    print(f"SCATS #{scats_number}")
-    print(f"Time: {time_str}\n")
+    # Paths
+    model_path = args.model_path
     
-    # Make prediction
+    # Load data
+    print("Loading test data...")
+    data_collector = TrafficDataCollector()
+    
     try:
-        result = predict_flow(
-            model_path=model_path,
-            scats_number=scats_number,
-            time_str=time_str,
-            device=device,
-            d_model=args.d_model,
-            num_heads=args.num_heads,
-            d_ff=args.d_ff,
-            num_layers=args.num_layers,
-            dropout=args.dropout
+        # Get test data loader
+        data_loaders = data_collector.get_data_loaders(
+            batch_size=1,  # For inference we use batch size of 1
+            shuffle=False,
+            random_state=42
         )
         
-        # Display results
-        if result:
-            print("Prediction Results:")
-            print(f"SCATS #{result['scats_number']}")
-            print(f"Reference time: {result['prediction_time']}")
-            print("\nPredicted traffic flow for the next 15 minutes:")
-            
-            for i, pred in enumerate(result['predictions']):
-                print(f"{pred['time']}: {pred['flow']} vehicles")
-                
+        test_loader = data_loaders['test_loader']
+        scaler = data_loaders['scaler']
+        
+        # Get input and output dimensions from data
+        X_sample, y_sample = next(iter(test_loader))
+        model_params['input_dim'] = X_sample.shape[2]
+        model_params['output_dim'] = y_sample.shape[2]
+        
+        print(f"Data loaded successfully.")
+        print(f"  Test samples: {len(test_loader)}")
+        print(f"  Input shape: {X_sample.shape}")
+        print(f"  Output shape: {y_sample.shape}")
+        
+        # Load model
+        model = load_model(model_path, model_params, device)
+        print(f"Model loaded from {model_path}")
+        
+        # Choose a random sample for visualization if not specified
+        if args.test_idx is None:
+            test_idx = random.randint(0, len(test_loader) - 1)
         else:
-            print("Prediction failed. See error messages above.")
+            test_idx = args.test_idx
             
-    except Exception as e:
-        import traceback
-        print(f"Error during prediction: {e}")
-        traceback.print_exc()
+        # Get the sample
+        for i, (X, y) in enumerate(test_loader):
+            if i == test_idx:
+                input_seq = X.numpy()
+                true_seq = y.numpy()[0]  # Remove batch dimension
+                
+                # Get site_id and date
+                sites_dates = data_collector.load_data()
+                site_id = sites_dates['sites'][test_idx]
+                date = sites_dates['dates'][test_idx]
+                
+                # Make prediction
+                pred_seq = predict(model, input_seq, device)[0]  # Remove batch dimension
+                
+                # Plot prediction
+                plot_prediction(true_seq, pred_seq, site_id, date, scaler, feature_idx=args.feature_idx)
+                break
+        
+    except FileNotFoundError as e:
+        print(f"Error: {e}")
+        print("Please run the transform_traffic_data.py script first to prepare the data.")
+        print(f"Command: python Utils/transform_traffic_data.py")
 
 if __name__ == "__main__":
-    main()
+    parser = argparse.ArgumentParser(description='Traffic Flow Prediction using Transformer')
+    parser.add_argument('--model_path', type=str, 
+                        default=os.path.join(os.path.dirname(os.path.abspath(__file__)), 
+                                           'save_models', 'transformer_traffic_model.pth'),
+                        help='Path to the trained model')
+    parser.add_argument('--test_idx', type=int, default=None,
+                        help='Index of the test sample to visualize (random if not specified)')
+    parser.add_argument('--feature_idx', type=int, default=0,
+                        help='Index of the feature to visualize (default: 0 - first flow feature)')
+    
+    args = parser.parse_args()
+    main(args)
