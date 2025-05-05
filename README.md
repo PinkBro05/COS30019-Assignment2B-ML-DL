@@ -7,6 +7,7 @@ This project focuses on estimating travel time using traffic flow data with vari
 
 ```
 ├── Data/
+|   ├── Data_dictionary.docs   # Contain metadata and note about the datasets
 │   ├── Raw/                    # Raw traffic data files
 │   │   └── main/               # Contains original SCATS traffic flow data by year
 │   │       ├── 2014/           # Traffic data for 2014 (VSDATA_*.csv files)
@@ -31,7 +32,7 @@ This project focuses on estimating travel time using traffic flow data with vari
 ├── LSTM/                       # LSTM model implementation (placeholder)
 ├── GRU/                        # GRU model implementation (placeholder)
 └── Utils/                      # Utility scripts for data processing
-    ├── pre_processing.py      # General data preprocessing utilities
+    ├── pre_processing.py      # data preprocessing utilities
     └── transform_traffic_data.py  # Script to transform raw data for model input
 ```
 
