@@ -3,7 +3,7 @@
 
 This project focuses on estimating travel time using traffic flow data with various deep learning models. The implementation includes Transformer, LSTM, and GRU architectures for time series prediction.
 
-## Dataset: (https://huggingface.co/datasets/PinkBro/vicroads-traffic-signals)[HuggingFace]
+## Dataset: [HuggingFace](https://huggingface.co/datasets/PinkBro/vicroads-traffic-signals)
 
 ## Project Structure
 
