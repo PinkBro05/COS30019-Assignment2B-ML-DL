@@ -3,7 +3,6 @@ import numpy as np
 import pandas as pd
 import torch
 from torch.utils.data import Dataset, DataLoader
-import pickle
 from datetime import datetime
 from sklearn.preprocessing import StandardScaler, LabelEncoder
 import math
@@ -58,6 +57,9 @@ class TrafficDataCollector:
         self.day_type_encoder = LabelEncoder()
         self.school_count_scaler = StandardScaler()
         self.flow_scaler = StandardScaler()
+        
+        # Store metadata for inverse transforms
+        self.metadata = {}
     
     def _create_cyclical_features(self, df):
         """Create cyclical features for time and date.
@@ -100,45 +102,43 @@ class TrafficDataCollector:
         
         return df
     
-    def prepare_data(self, input_file, seq_len=24, pred_len=8, step_size=1, 
-                    save=True, output_file='transformer_processed_data.pkl'):
-        """Prepare data from long-format traffic data.
+    def process_data(self, input_file, seq_len=24, pred_len=8, step_size=4):
+        """Process data from a CSV file.
         
         Args:
-            input_file: Name of the input CSV file in long format
+            input_file: Path to the CSV file
             seq_len: Length of input sequence (in time steps)
             pred_len: Length of prediction sequence (in time steps)
             step_size: Step size for sliding window
-            save: Whether to save the processed data
-            output_file: Name of the output file
             
         Returns:
             Dictionary with processed data
         """
-        # Load the data
-        file_path = os.path.join(self.data_path, input_file)
-        df = pd.read_csv(file_path)
+        # Check if file exists
+        if not os.path.exists(input_file):
+            raise FileNotFoundError(f"CSV file not found at {input_file}")
         
+        # Load the CSV file
+        df = pd.read_csv(input_file)
         print(f"Loaded data with shape: {df.shape}")
         
         # Create cyclical features for date and time
         df = self._create_cyclical_features(df)
         
         # Process categorical features
-        
         # 1. NB_SCATS_SITE: encode as indices for embedding
         df['NB_SCATS_SITE_encoded'] = self.site_encoder.fit_transform(df['NB_SCATS_SITE'])
         site_classes = len(self.site_encoder.classes_)
         
-        # 4. scat_type: categorical encoding
+        # 2. scat_type: categorical encoding
         df['scat_type_encoded'] = self.scat_type_encoder.fit_transform(df['scat_type'])
         scat_type_classes = len(self.scat_type_encoder.classes_)
         
-        # 5. day_type: encode as indices for embedding
+        # 3. day_type: encode as indices for embedding
         df['day_type_encoded'] = self.day_type_encoder.fit_transform(df['day_type'])
         day_type_classes = len(self.day_type_encoder.classes_)
         
-        # 6 & 7. Standardize numerical features
+        # 4. Standardize numerical features
         df['school_count_scaled'] = self.school_count_scaler.fit_transform(df[['school_count']])
         df['Flow_scaled'] = self.flow_scaler.fit_transform(df[['Flow']])
         
@@ -209,7 +209,7 @@ class TrafficDataCollector:
         input_dim = X.shape[2]  # Number of features
         output_dim = 1  # Predicting Flow only
         
-        # Store the mappings, scalers, and metadata for later use
+        # Store the encoders and scalers for later use
         encoders_scalers = {
             'site_encoder': self.site_encoder,
             'scat_type_encoder': self.scat_type_encoder,
@@ -218,72 +218,48 @@ class TrafficDataCollector:
             'flow_scaler': self.flow_scaler
         }
         
+        # Store metadata for later use
+        self.metadata = {
+            'sites': sites,
+            'dates': dates,
+            'feature_cols': feature_cols
+        }
+        
         # Prepare data dictionary
         data = {
             'X': X,
             'y': y,
-            'sites': sites,
-            'dates': dates,
             'encoders_scalers': encoders_scalers,
-            'feature_cols': feature_cols,
             'categorical_indices': categorical_indices,
             'categorical_metadata': categorical_metadata,
             'input_dim': input_dim,
             'output_dim': output_dim
         }
         
-        # Save processed data
-        if save:
-            output_path = os.path.join(self.data_path, output_file)
-            with open(output_path, 'wb') as f:
-                pickle.dump(data, f)
-            print(f"Saved processed data to {output_path}")
-        
-        return data
-            
-    def load_data(self, filename='transformer_processed_data.pkl'):
-        """Load the prepared data for the Transformer model.
-        
-        Args:
-            filename: Name of the file containing the prepared data
-            
-        Returns:
-            Dictionary with processed data
-        """
-        file_path = os.path.join(self.data_path, filename)
-        
-        if not os.path.exists(file_path):
-            raise FileNotFoundError(f"Data file not found at {file_path}. Run prepare_data method first.")
-        
-        # Load the pickle file
-        with open(file_path, 'rb') as f:
-            data = pickle.load(f)
-            
         return data
     
-    def get_data_loaders(self, train_ratio=0.7, val_ratio=0.15, test_ratio=0.15, 
-                         batch_size=32, shuffle=True, num_workers=0, 
-                         random_state=42, filename='transformer_processed_data.pkl'):
+    def get_data_loaders(self, data_file, batch_size=32, shuffle=True, num_workers=0, 
+                         train_ratio=0.7, val_ratio=0.15, test_ratio=0.15, random_state=42):
         """Prepare data loaders for training, validation, and testing.
         
         Args:
-            train_ratio: Ratio of training data
-            val_ratio: Ratio of validation data
-            test_ratio: Ratio of test data
+            data_file: Path to the CSV data file
             batch_size: Batch size for dataloaders
             shuffle: Whether to shuffle the data
             num_workers: Number of workers for dataloaders
+            train_ratio: Ratio of training data
+            val_ratio: Ratio of validation data
+            test_ratio: Ratio of test data
             random_state: Random seed for reproducibility
-            filename: Name of the file containing the prepared data
             
         Returns:
             Dictionary with data loaders and metadata
         """
-        # Load the data
-        data = self.load_data(filename)
+        # Process the data
+        data = self.process_data(data_file)
         X, y = data['X'], data['y']
-        categorical_indices = data.get('categorical_indices', None)
-        categorical_metadata = data.get('categorical_metadata', None)
+        categorical_indices = data['categorical_indices']
+        categorical_metadata = data['categorical_metadata']
         
         # Set random seed for reproducibility
         np.random.seed(random_state)
@@ -344,6 +320,14 @@ class TrafficDataCollector:
             'output_dim': data.get('output_dim', 1)
         }
     
+    def get_metadata(self):
+        """Get metadata stored during data processing.
+        
+        Returns:
+            Dictionary with metadata
+        """
+        return self.metadata
+    
     def inverse_transform_flow(self, normalized_data, encoders_scalers):
         """Inverse transform normalized flow data to original scale.
         
@@ -373,20 +357,13 @@ class TrafficDataCollector:
 
 # Example usage
 if __name__ == "__main__":
-    # Create a data collector with embedding dimension 16
+    # Create a data collector
     data_collector = TrafficDataCollector(embedding_dim=16)
     
     try:
-        # Prepare data from long-format traffic data
-        data_collector.prepare_data(
-            input_file='sample_long_format_revised.csv',
-            seq_len=24,  # 6 hours (15-minute intervals)
-            pred_len=8,  # 2 hours prediction horizon
-            step_size=4  # Create a new sequence every hour
-        )
-        
-        # Get data loaders
-        data = data_collector.get_data_loaders(batch_size=32)
+        # Get data loaders directly from CSV file
+        data_file = os.path.join(data_collector.data_path, 'sample_long_format_revised.csv')
+        data = data_collector.get_data_loaders(data_file, batch_size=32)
         
         # Print some information about the data
         train_loader = data['train_loader']
@@ -410,4 +387,4 @@ if __name__ == "__main__":
         
     except FileNotFoundError as e:
         print(f"Error: {e}")
-        print("Please make sure the long-format traffic data file exists in the Data/Transformed directory.")
+        print("Please make sure the CSV data file exists.")
