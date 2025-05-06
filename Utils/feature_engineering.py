@@ -1,8 +1,144 @@
-import pandas as pd
 import os
-from datetime import datetime
-import glob
+import pandas as pd
 import numpy as np
+import re
+from glob import glob
+
+from path_utilities import PathManager
+from traffic_data_transformation import load_csv_with_fallback_encoding
+
+
+def haversine_distance(lon1, lat1, lon2, lat2):
+    """Calculate haversine distance in meters between two points on Earth."""
+    # Convert decimal degrees to radians
+    lon1, lat1, lon2, lat2 = map(np.radians, [lon1, lat1, lon2, lat2])
+    
+    # Haversine formula
+    dlon = lon2 - lon1
+    dlat = lat2 - lat1
+    a = np.sin(dlat/2)**2 + np.cos(lat1) * np.cos(lat2) * np.sin(dlon/2)**2
+    c = 2 * np.arcsin(np.sqrt(a))
+    # Radius of Earth in meters
+    r = 6371000
+    return c * r
+
+
+def prepare_school_data(base_dir):
+    """Prepare school count data for each SCAT site."""
+    # Use the path manager to construct correct paths
+    raw_dir = PathManager.get_raw_dir(base_dir)
+    transformed_dir = PathManager.get_transformed_dir(base_dir)
+    
+    traffic_lights_path = os.path.join(raw_dir, "Traffic_Lights.csv")
+    school_path = os.path.join(raw_dir, "school.csv")
+    output_path = os.path.join(transformed_dir, "school_dic.csv")
+    
+    # Create directory if it doesn't exist
+    PathManager.ensure_dir_exists(os.path.dirname(output_path))
+    
+    print(f"Loading traffic lights data from: {traffic_lights_path}")
+    print(f"Loading school data from: {school_path}")
+    print(f"Output will be saved to: {output_path}")
+    
+    # Load data with explicit encoding and handle errors
+    try:
+        traffic_df = load_csv_with_fallback_encoding(traffic_lights_path)
+        school_df = load_csv_with_fallback_encoding(school_path)
+    except FileNotFoundError as e:
+        print(f"Error: {e}")
+        print("Trying alternative paths...")
+        
+        # Try alternative path structures
+        alt_paths = [
+            os.path.join(os.path.dirname(base_dir), "Data", "Raw", "main"),
+            os.path.join(base_dir, "Raw", "main")
+        ]
+        
+        traffic_file = PathManager.find_file("Traffic_Lights.csv", alt_paths)
+        school_file = PathManager.find_file("school.csv", alt_paths)
+        
+        if not traffic_file or not school_file:
+            raise FileNotFoundError(f"Could not find required data files in any of the tried paths: {alt_paths}")
+        
+        traffic_df = load_csv_with_fallback_encoding(traffic_file)
+        school_df = load_csv_with_fallback_encoding(school_file)
+    
+    # Extract coordinates from traffic lights data
+    traffic_df[['long', 'lat']] = traffic_df['geometry'].str.extract(r'POINT \((.*) (.*)\)')
+    traffic_df['long'] = pd.to_numeric(traffic_df['long'], errors='coerce')
+    traffic_df['lat'] = pd.to_numeric(traffic_df['lat'], errors='coerce')
+    
+    # Extract coordinates from school data
+    school_df['long'] = school_df['X'].astype(float)
+    school_df['lat'] = school_df['Y'].astype(float)
+    
+    # Initialize result dataframe
+    result_df = pd.DataFrame(columns=['scat_number', 'school_count', 'long', 'lat'])
+    
+    # Iterate through each traffic light
+    print("Calculating distances and counting schools within 500 meters...")
+    result_data = []
+    for _, traffic_row in traffic_df.iterrows():
+        if pd.isna(traffic_row['long']) or pd.isna(traffic_row['lat']):
+            continue
+            
+        site_no = traffic_row['SITE_NO']
+        long = traffic_row['long']
+        lat = traffic_row['lat']
+        
+        # Count schools within 500 meters
+        school_count = count_nearby_schools(traffic_row, school_df, 500)
+        
+        # Add to result data
+        result_data.append({
+            'scat_number': site_no,
+            'school_count': school_count,
+            'long': long,
+            'lat': lat
+        })
+    
+    # Convert to DataFrame
+    result_df = pd.DataFrame(result_data)
+    
+    # Save to CSV
+    print(f"Saving school count data to {output_path}...")
+    result_df.to_csv(output_path, index=False)
+    print("School count data preparation complete!")
+    
+    return result_df
+
+
+def count_nearby_schools(traffic_point, school_df, max_distance):
+    """Count schools within specified distance of a traffic light.
+    
+    Args:
+        traffic_point: Row from traffic_df with long and lat
+        school_df: DataFrame containing school locations
+        max_distance: Maximum distance in meters
+        
+    Returns:
+        Number of schools within the specified distance
+    """
+    count = 0
+    traffic_long = traffic_point['long']
+    traffic_lat = traffic_point['lat']
+    
+    for _, school_row in school_df.iterrows():
+        if pd.isna(school_row['long']) or pd.isna(school_row['lat']):
+            continue
+            
+        # Calculate distance
+        distance = haversine_distance(
+            traffic_long, traffic_lat,
+            school_row['long'], school_row['lat']
+        )
+        
+        # Check if within max_distance
+        if distance <= max_distance:
+            count += 1
+            
+    return count
+
 
 def add_scat_type(transformed_df, scat_type_df, traffic_lights_df):
     """
@@ -44,6 +180,7 @@ def add_scat_type(transformed_df, scat_type_df, traffic_lights_df):
     transformed_df['scat_type'] = transformed_df['scat_type'].fillna("Unknown")
     
     return transformed_df
+
 
 def add_day_type(transformed_df, holidays_df):
     """
@@ -115,6 +252,7 @@ def add_day_type(transformed_df, holidays_df):
             
         try:
             # Parse the date (assuming format like "YYYY-MM-DD")
+            from datetime import datetime
             dt = datetime.strptime(date_str, "%Y-%m-%d")
             
             # Create key in MM-DD format for lookup
@@ -131,6 +269,7 @@ def add_day_type(transformed_df, holidays_df):
     transformed_df['day_type'] = transformed_df[date_column].apply(is_holiday)
     
     return transformed_df
+
 
 def add_school_dic(transformed_df, school_dic_df):
     """
@@ -204,20 +343,26 @@ def process_file(file_path, scat_type_df, traffic_lights_df, holidays_df, school
         try:
             df.to_csv(output_path, index=False)
             print(f"Saved to {output_path}")
-            return True
+            return True, output_path
         except Exception as e:
             print(f"Error saving file to {output_path}: {e}")
-            return False
+            return False, None
         
     except Exception as e:
         print(f"Unexpected error processing {file_path}: {e}")
-        return False
+        return False, None
 
-def main():
-    # Define paths
-    base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-    transformed_dir = os.path.join(base_dir, "Data", "Transformed")
-    raw_dir = os.path.join(base_dir, "Data", "Raw", "main")
+
+def feature_engineering(base_dir, transformed_files=None):
+    """Apply feature engineering to transformed data files."""
+    # Define paths - check if base_dir already ends with 'Data'
+    if base_dir.endswith('Data'):
+        transformed_dir = os.path.join(base_dir, "Transformed")
+        raw_dir = os.path.join(base_dir, "Raw", "main")
+    else:
+        transformed_dir = os.path.join(base_dir, "Data", "Transformed")
+        raw_dir = os.path.join(base_dir, "Data", "Raw", "main")
+    
     output_dir = transformed_dir  # Save back to the same directory
     
     # Load mapping data
@@ -226,35 +371,73 @@ def main():
     holiday_path = os.path.join(raw_dir, "2025_public_holiday.csv")
     school_dic_path = os.path.join(transformed_dir, "school_dic.csv")
     
-    scat_type_df = pd.read_csv(scat_type_path)
-    traffic_lights_df = pd.read_csv(traffic_lights_path)
-    holidays_df = pd.read_csv(holiday_path)
-    school_dic_df = pd.read_csv(school_dic_path)
+    # Print the paths for debugging
+    print(f"Using the following paths:")
+    print(f"- Scat type: {scat_type_path}")
+    print(f"- Traffic lights: {traffic_lights_path}")
+    print(f"- Holiday data: {holiday_path}")
+    print(f"- School data: {school_dic_path}")
+    
+    # Prepare school data if it doesn't exist
+    if not os.path.exists(school_dic_path):
+        print("School dictionary not found. Generating...")
+        prepare_school_data(base_dir)
+    
+    try:
+        scat_type_df = pd.read_csv(scat_type_path)
+        traffic_lights_df = pd.read_csv(traffic_lights_path)
+        holidays_df = pd.read_csv(holiday_path)
+        school_dic_df = pd.read_csv(school_dic_path)
+    except FileNotFoundError as e:
+        print(f"Error: {e}")
+        print("Checking alternate path structure...")
+        
+        # Try alternative path structure
+        alt_base_dir = os.path.dirname(base_dir) if base_dir.endswith('Data') else os.path.join(base_dir, "Data")
+        alt_raw_dir = os.path.join(alt_base_dir, "Raw", "main")
+        
+        print(f"Trying alternative paths:")
+        print(f"- Alt raw dir: {alt_raw_dir}")
+        
+        # Try with alternative paths
+        scat_type_path = os.path.join(alt_raw_dir, "scat_type.csv")
+        traffic_lights_path = os.path.join(alt_raw_dir, "Traffic_Lights.csv")
+        holiday_path = os.path.join(alt_raw_dir, "2025_public_holiday.csv")
+        
+        print(f"- Alt scat type: {scat_type_path}")
+        print(f"- Alt traffic lights: {traffic_lights_path}")
+        print(f"- Alt holiday data: {holiday_path}")
+        
+        scat_type_df = pd.read_csv(scat_type_path)
+        traffic_lights_df = pd.read_csv(traffic_lights_path)
+        holidays_df = pd.read_csv(holiday_path)
+        school_dic_df = pd.read_csv(school_dic_path)
     
     print(f"Loaded reference data: {len(scat_type_df)} scat types, {len(traffic_lights_df)} traffic lights, {len(holidays_df)} holidays, {len(school_dic_df)} school counts")
     
-    # Get all transformed data files for years 2014-2024
-    pattern = os.path.join(transformed_dir, "*_transformed_scats_data.csv")
-    files = glob.glob(pattern)
-    
-    # Filter for years 2014-2024
-    files = [f for f in files if any(str(year) in f for year in range(2014, 2025))]
+    # Get files to process
+    if transformed_files is None:
+        # Get all transformed data files for years 2014-2024
+        pattern = os.path.join(transformed_dir, "*_transformed_scats_data.csv")
+        files = glob(pattern)
+        
+        # Filter for years 2014-2024
+        files = [f for f in files if any(str(year) in f for year in range(2014, 2025))]
+    else:
+        files = transformed_files if isinstance(transformed_files, list) else [transformed_files]
     
     if not files:
         print("No transformed files found!")
-        return
+        return []
     
     print(f"Found {len(files)} files to process.")
     
     # Process each file
-    success_count = 0
+    success_files = []
     for file in files:
-        if process_file(file, scat_type_df, traffic_lights_df, holidays_df, school_dic_df, output_dir):
-            success_count += 1
+        success, output_path = process_file(file, scat_type_df, traffic_lights_df, holidays_df, school_dic_df, output_dir)
+        if success:
+            success_files.append(output_path)
     
-    print(f"Processing complete. Successfully processed {success_count} out of {len(files)} files.")
-
-
-if __name__ == "__main__":
-    # run the full process (add_scat_type => add_day_type => add_school_dic):
-    main()
+    print(f"Feature engineering complete. Successfully processed {len(success_files)} out of {len(files)} files.")
+    return success_files

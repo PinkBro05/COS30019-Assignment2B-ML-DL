@@ -175,10 +175,7 @@ cython_debug/
 COS30019-2025 S1-A2_B.pdf
 Data/Raw/Data_dictionary.docx
 
-Data/Raw/metadata and excel file/
 Data/Raw/main/20*/
 Data/Transformed/201*.csv
 Data/Transformed/202*.csv
-Data/Transformed/long_format_20*.csv
-
-Data/Transformed/long_format_2014_2019.csv
+Data/Transformed/final_time_series_*.csv
