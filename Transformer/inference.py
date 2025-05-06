@@ -1,228 +1,217 @@
-from models.vanila_encoder import TransformerModel
-from utils.data_collector import load_time_series_data
+import os
 import torch
 import numpy as np
-import datetime
-import os
+import matplotlib.pyplot as plt
+import sys
+import random
 import argparse
+from datetime import datetime, timedelta
 
-def inference(model, location, time_str, device, data_dict=None):
-    """ Predicting next 1 hour traffic flow from given time and location
+# Add parent directory to path to import from utils
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from utils.traffic_data_collector import TrafficDataCollector
+from models.model import Transformer
 
+def load_model(model_path, model_params, device):
+    """Load a trained Transformer model.
+    
     Args:
-        model: Trained TransformerModel
-        location: Tuple of (SCATS Number, Location string)
-        time_str: Time string in format "DD/MM/YYYY HH:MM:SS"
-        device: Device to evaluate on
-        data_dict: Dictionary containing scalers and feature information
-
+        model_path: Path to the saved model
+        model_params: Dictionary with model parameters
+        device: Device to load the model on
+        
     Returns:
-        List of predicted flow values for the next 4 time frames (1 hour)
+        Loaded model
     """
+    model = Transformer(
+        input_dim=model_params['input_dim'],
+        output_dim=model_params['output_dim'],
+        d_model=model_params['d_model'],
+        nhead=model_params['nhead'],
+        num_encoder_layers=model_params['num_encoder_layers'],
+        num_decoder_layers=model_params['num_decoder_layers'],
+        dim_feedforward=model_params['dim_feedforward'],
+        dropout=model_params['dropout'],
+        seq_length=model_params['seq_length'],
+        pred_length=model_params['pred_length']
+    )
+    
+    model.load_state_dict(torch.load(model_path, map_location=device))
     model.to(device)
     model.eval()
     
-    # Parse location tuple
-    scats_number, location_str = location
-    
-    # Parse time string to datetime
-    try:
-        dt = datetime.datetime.strptime(time_str, "%d/%m/%Y %H:%M:%S")
-    except ValueError:
-        print("Error: Time format should be DD/MM/YYYY HH:MM:SS")
-        return None
-    
-    # Create features for the next 4 time frames
-    predictions = []
-    
-    # Get feature columns from data_dict if available
-    feature_columns = data_dict.get('feature_columns', 
-                                   ['SCATS Number', 'Location', 'Hour', 'Minute', 'DayOfWeek'])
-    
-    # Create a sequence of 4 time steps (15-min intervals) as input
-    sequence_data = []
-    current_time = dt
-    
-    # Create a sequence of the current time and the 3 previous 15-minute intervals
-    for i in range(4):
-        time_step = current_time - datetime.timedelta(minutes=(3-i)*15)
-        
-        # Extract features
-        features = {
-            'SCATS Number': scats_number,  # Should be encoded, but for now use as is
-            'Location': 0,  # Placeholder, will be encoded
-            'Hour': time_step.hour,
-            'Minute': time_step.minute,
-            'DayOfWeek': time_step.weekday()
-        }
-        
-        # Keep only the features mentioned in feature_columns
-        features = {k: features[k] for k in feature_columns if k in features}
-        
-        # Add to sequence
-        sequence_data.append([features[col] for col in feature_columns])
-    
-    # Convert to numpy array
-    input_sequence = np.array(sequence_data)
-    
-    # Scale features if scalers are available
-    if data_dict and 'scalers' in data_dict and data_dict['scalers'] is not None:
-        scaler_X = data_dict['scalers']['X']
-        input_sequence = scaler_X.transform(input_sequence)
-    
-    # Convert to PyTorch tensor and add batch dimension
-    input_tensor = torch.tensor(input_sequence, dtype=torch.float32).unsqueeze(0).to(device)
-    
-    # Perform inference
-    with torch.no_grad():
-        output = model(input_tensor)
-        predicted_values = output.cpu().numpy()[0]  # Remove batch dimension
-    
-    # Inverse transform if scalers are available
-    if data_dict and 'scalers' in data_dict and data_dict['scalers'] is not None:
-        scaler_y = data_dict['scalers']['y']
-        predicted_values = scaler_y.inverse_transform(predicted_values.reshape(-1, 1)).flatten()
-    
-    # Create a list of predictions with timestamps
-    next_time = dt
-    
-    for i in range(4):  # 4 predictions for the next hour
-        next_time = next_time + datetime.timedelta(minutes=15)
-        predictions.append({
-            'time': next_time.strftime("%H:%M:%S"),
-            'flow': round(float(predicted_values[i]), 1)
-        })
-    
-    return predictions
+    return model
 
-def predict_flow(model_path, location, time_str, device=None):
-    """
-    User-friendly function to predict traffic flow for the next hour
+def predict(model, input_seq, device):
+    """Make a prediction using the Transformer model.
     
     Args:
-        model_path: Path to the trained model file
-        location: Tuple of (SCATS Number, Location string)
-        time_str: Time string in format "DD/MM/YYYY HH:MM:SS"
-        device: Device to run inference on (None for automatic selection)
+        model: Trained Transformer model
+        input_seq: Input sequence (shape: [batch_size, seq_length, input_dim])
+        device: Device to run the prediction on
         
     Returns:
-        Dictionary with predictions for the next hour
+        Predicted sequence (shape: [batch_size, pred_length, output_dim])
     """
-    if device is None:
-        device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+    model.eval()
+    with torch.no_grad():
+        input_tensor = torch.FloatTensor(input_seq).to(device)
+        output = model(input_tensor)
     
-    # Load data to get scalers and feature info
-    try:
-        traffic_flow = load_time_series_data()
-        data = traffic_flow.prepare_data_for_training(
-            sequence_length=4,
-            prediction_horizon=4,
-            scale_method='standard'
-        )
-    except Exception as e:
-        print(f"Warning: Could not load training data for scaling: {e}")
-        print("Predictions will not be properly scaled.")
-        data = None
-    
-    # Load model
-    try:
-        # Get input dimensionality
-        if data:
-            input_dim = data['X_train'].shape[-1]
-        else:
-            input_dim = 5  # Default: SCATS Number, Location, Hour, Minute, DayOfWeek
-        
-        # Create model with same architecture as training
-        model = TransformerModel(
-            input_dim=input_dim,
-            d_model=64,
-            num_heads=8,
-            d_ff=256,
-            output_size=4,
-            num_layers=2,
-            dropout=0.1
-        )
-        
-        # Load trained weights
-        model.load_state_dict(torch.load(model_path, map_location=device))
-        model.to(device)
-        model.eval()
-        
-    except Exception as e:
-        print(f"Error loading model: {e}")
-        return None
-    
-    # Run inference
-    predictions = inference(model, location, time_str, device, data)
-    
-    # Format results
-    result = {
-        'location': location,
-        'prediction_time': time_str,
-        'predictions': predictions
-    }
-    
-    return result
+    return output.cpu().numpy()
 
-def main():
+def plot_prediction(true_seq, pred_seq, site_id, date, scaler, feature_idx=0, time_interval=15):
+    """Plot the true and predicted sequences.
+    
+    Args:
+        true_seq: True sequence (shape: [pred_length, output_dim])
+        pred_seq: Predicted sequence (shape: [pred_length, output_dim])
+        site_id: Traffic site ID
+        date: Date of the sequence
+        scaler: Dictionary with normalization parameters
+        feature_idx: Index of the feature to plot
+        time_interval: Time interval in minutes
     """
-    Example usage of the traffic flow prediction model.
-    """
-    print("Traffic Flow Prediction Example")
-    print("="*40)
+    # Get the prediction length
+    pred_length = true_seq.shape[0]
     
-    argparser = argparse.ArgumentParser(description="Traffic Flow Prediction")
-    argparser.add_argument('--model_path', type=str, default='Transformer/save_models/transformer_model_test.pth',)
+    # Inverse transform the sequences
+    data_collector = TrafficDataCollector()
+    true_seq_orig = data_collector.inverse_transform(true_seq, scaler, is_target=True)
+    pred_seq_orig = data_collector.inverse_transform(pred_seq, scaler, is_target=True)
     
-    # Path to the trained model
-    model_path = argparser.parse_args().model_path
+    # Extract the specified feature
+    true_values = true_seq_orig[:, feature_idx]
+    pred_values = pred_seq_orig[:, feature_idx]
     
-    # Check if the model file exists
-    if not os.path.exists(model_path):
-        print(f"Error: Model file not found at {model_path}")
-        print("Please make sure you've trained the model first.")
-        return
+    # Create time points for x-axis
+    start_time = datetime.strptime('00:00', '%H:%M')
+    time_points = [(start_time + timedelta(minutes=i*time_interval)).strftime('%H:%M') 
+                   for i in range(pred_length)]
     
-    # Specify device (use GPU if available)
-    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+    # Create the plot
+    plt.figure(figsize=(10, 6))
+    plt.plot(time_points, true_values, 'b-', marker='o', label='Actual Traffic Flow')
+    plt.plot(time_points, pred_values, 'r-', marker='x', label='Predicted Traffic Flow')
+    plt.xlabel('Time')
+    plt.ylabel('Traffic Flow Volume')
+    plt.title(f'Traffic Flow Prediction for Site {site_id} on {date}')
+    plt.xticks(rotation=45)
+    plt.grid(True)
+    plt.legend()
+    plt.tight_layout()
+    
+    # Save the plot
+    plot_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'predictions')
+    os.makedirs(plot_dir, exist_ok=True)
+    plt.savefig(os.path.join(plot_dir, f'prediction_site{site_id}_{date}.png'))
+    plt.show()
+    
+    # Calculate evaluation metrics
+    mae = np.mean(np.abs(true_values - pred_values))
+    mape = np.mean(np.abs((true_values - pred_values) / (true_values + 1e-5))) * 100
+    rmse = np.sqrt(np.mean(np.square(true_values - pred_values)))
+    
+    print(f"Evaluation Metrics for Site {site_id} on {date}:")
+    print(f"  MAE: {mae:.2f}")
+    print(f"  MAPE: {mape:.2f}%")
+    print(f"  RMSE: {rmse:.2f}")
+
+def main(args):
+    # Set device
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(f"Using device: {device}")
     
-    # Example location (SCATS number, location name)
-    location = (970, "WARRIGAL_RD N of HIGH STREET_RD")
+    # Set random seeds for reproducibility
+    torch.manual_seed(42)
+    np.random.seed(42)
+    random.seed(42)
     
-    # Example time (format: DD/MM/YYYY HH:MM:SS)
-    time_str = "23/04/2025 00:00:00"
+    # Model parameters (should match trained model)
+    model_params = {
+        'input_dim': None,  # Will be set from data
+        'output_dim': None,  # Will be set from data
+        'd_model': 64,
+        'nhead': 8,
+        'num_encoder_layers': 3,
+        'num_decoder_layers': 3,
+        'dim_feedforward': 256,
+        'dropout': 0.1,
+        'seq_length': 24,
+        'pred_length': 4
+    }
     
-    print(f"\nPredicting traffic flow for:")
-    print(f"Location: {location[1]} (SCATS #{location[0]})")
-    print(f"Time: {time_str}\n")
+    # Paths
+    model_path = args.model_path
     
-    # Make prediction
+    # Load data
+    print("Loading test data...")
+    data_collector = TrafficDataCollector()
+    
     try:
-        result = predict_flow(
-            model_path=model_path,
-            location=location,
-            time_str=time_str,
-            device=device
+        # Get test data loader
+        data_loaders = data_collector.get_data_loaders(
+            batch_size=1,  # For inference we use batch size of 1
+            shuffle=False,
+            random_state=42
         )
         
-        # Display results
-        if result:
-            print("Prediction Results:")
-            print(f"Location: {result['location'][1]} (SCATS #{result['location'][0]})")
-            print(f"Reference time: {result['prediction_time']}")
-            print("\nPredicted traffic flow for the next hour:")
-            
-            for i, pred in enumerate(result['predictions']):
-                print(f"{pred['time']}: {pred['flow']} vehicles")
-                
+        test_loader = data_loaders['test_loader']
+        scaler = data_loaders['scaler']
+        
+        # Get input and output dimensions from data
+        X_sample, y_sample = next(iter(test_loader))
+        model_params['input_dim'] = X_sample.shape[2]
+        model_params['output_dim'] = y_sample.shape[2]
+        
+        print(f"Data loaded successfully.")
+        print(f"  Test samples: {len(test_loader)}")
+        print(f"  Input shape: {X_sample.shape}")
+        print(f"  Output shape: {y_sample.shape}")
+        
+        # Load model
+        model = load_model(model_path, model_params, device)
+        print(f"Model loaded from {model_path}")
+        
+        # Choose a random sample for visualization if not specified
+        if args.test_idx is None:
+            test_idx = random.randint(0, len(test_loader) - 1)
         else:
-            print("Prediction failed. See error messages above.")
+            test_idx = args.test_idx
             
-    except Exception as e:
-        import traceback
-        print(f"Error during prediction: {e}")
-        traceback.print_exc()
+        # Get the sample
+        for i, (X, y) in enumerate(test_loader):
+            if i == test_idx:
+                input_seq = X.numpy()
+                true_seq = y.numpy()[0]  # Remove batch dimension
+                
+                # Get site_id and date
+                sites_dates = data_collector.load_data()
+                site_id = sites_dates['sites'][test_idx]
+                date = sites_dates['dates'][test_idx]
+                
+                # Make prediction
+                pred_seq = predict(model, input_seq, device)[0]  # Remove batch dimension
+                
+                # Plot prediction
+                plot_prediction(true_seq, pred_seq, site_id, date, scaler, feature_idx=args.feature_idx)
+                break
+        
+    except FileNotFoundError as e:
+        print(f"Error: {e}")
+        print("Please run the transform_traffic_data.py script first to prepare the data.")
+        print(f"Command: python Utils/transform_traffic_data.py")
 
 if __name__ == "__main__":
-    main()
+    parser = argparse.ArgumentParser(description='Traffic Flow Prediction using Transformer')
+    parser.add_argument('--model_path', type=str, 
+                        default=os.path.join(os.path.dirname(os.path.abspath(__file__)), 
+                                           'save_models', 'transformer_traffic_model.pth'),
+                        help='Path to the trained model')
+    parser.add_argument('--test_idx', type=int, default=None,
+                        help='Index of the test sample to visualize (random if not specified)')
+    parser.add_argument('--feature_idx', type=int, default=0,
+                        help='Index of the feature to visualize (default: 0 - first flow feature)')
+    
+    args = parser.parse_args()
+    main(args)

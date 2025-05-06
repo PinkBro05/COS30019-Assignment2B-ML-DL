@@ -1,268 +1,227 @@
+import os
 import torch
 import torch.nn as nn
-import math
-import torch.nn.functional as F
-import pandas as pd
+import torch.optim as optim
 import numpy as np
-import argparse
 import matplotlib.pyplot as plt
+from torch.utils.data import DataLoader
+import time
+import sys
 
-from utils.data_collector import load_time_series_data, create_time_series_dataloaders, show_sample_data
-from models.vanila_encoder import TransformerModel
+# Add parent directory to path to import from utils
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from utils.traffic_data_collector import TrafficDataCollector
+from models.model import Transformer
+
+def train_transformer(
+    model,
+    train_loader,
+    val_loader,
+    criterion,
+    optimizer,
+    scheduler,
+    num_epochs,
+    device,
+    save_path=None
+):
+    """Train the Transformer model.
     
-def train_model(model, train_loader, val_loader, optimizer, device, 
-                num_epochs=50, patience=10):
-    """
     Args:
-        model: TransformerModel instance
-        train_loader: DataLoader for training data
-        val_loader: DataLoader for validation data
-        optimizer: PyTorch optimizer
-        device: Device to train on (cpu or cuda)
-        num_epochs: Maximum number of training epochs
-        patience: Early stopping patience
-    
+        model: Transformer model
+        train_loader: Training data loader
+        val_loader: Validation data loader
+        criterion: Loss function
+        optimizer: Optimizer
+        scheduler: Learning rate scheduler
+        num_epochs: Number of epochs to train
+        device: Device to train on
+        save_path: Path to save the best model
+        
     Returns:
-        Dictionary with training history and trained model
+        Dictionary with training and validation losses
     """
     model.to(device)
     
-    # Loss function
-    mse_loss = nn.MSELoss()
-    
-    # For early stopping
-    best_val_loss = float('inf')
-    epochs_without_improvement = 0
-    
+    # To track the training and validation loss
     history = {
         'train_loss': [],
         'val_loss': []
     }
     
-    best_model_state = None
+    best_val_loss = float('inf')
     
     for epoch in range(num_epochs):
+        start_time = time.time()
+        
         # Training
         model.train()
-        train_loss = 0.0
+        train_loss = 0
         
-        for inputs, targets in train_loader:
-            inputs, targets = inputs.to(device), targets.to(device)
+        for X_batch, y_batch in train_loader:
+            X_batch, y_batch = X_batch.to(device), y_batch.to(device)
             
             # Forward pass
+            outputs = model(X_batch)
+            loss = criterion(outputs, y_batch)
+            
+            # Backward and optimize
             optimizer.zero_grad()
-            outputs = model(inputs)
-            
-            # Ensure outputs and targets have the right shape for multi-step prediction
-            # outputs shape should be [batch_size, output_size] where output_size=4
-            # targets shape should be [batch_size, output_size] where output_size=4
-            loss = mse_loss(outputs, targets)
-            
-            # Backward pass
             loss.backward()
             optimizer.step()
             
             train_loss += loss.item()
         
-        # Average loss over batches
+        # Calculate average training loss
         train_loss /= len(train_loader)
+        history['train_loss'].append(train_loss)
         
         # Validation
         model.eval()
-        val_loss = 0.0
+        val_loss = 0
         
         with torch.no_grad():
-            for inputs, targets in val_loader:
-                inputs, targets = inputs.to(device), targets.to(device)
-                outputs = model(inputs)
-                loss = mse_loss(outputs, targets)
+            for X_batch, y_batch in val_loader:
+                X_batch, y_batch = X_batch.to(device), y_batch.to(device)
+                
+                # Forward pass
+                outputs = model(X_batch)
+                loss = criterion(outputs, y_batch)
+                
                 val_loss += loss.item()
         
-        # Average loss over batches
+        # Calculate average validation loss
         val_loss /= len(val_loader)
-        
-        # Record history
-        history['train_loss'].append(train_loss)
         history['val_loss'].append(val_loss)
         
-        # Print progress
-        print(f'Epoch {epoch+1}/{num_epochs} | '
-              f'Train Loss (MSE): {train_loss:.4f} | '
-              f'Val Loss (MSE): {val_loss:.4f}')
+        # Learning rate scheduling
+        if scheduler:
+            scheduler.step(val_loss)
         
-        # Early stopping
-        if val_loss < best_val_loss:
+        # Save the best model
+        if val_loss < best_val_loss and save_path:
             best_val_loss = val_loss
-            epochs_without_improvement = 0
-            # Could save best model here
-            best_model_state = model.state_dict()
-        else:
-            epochs_without_improvement += 1
-            if epochs_without_improvement >= patience:
-                print(f'Early stopping after {epoch+1} epochs')
-                # Restore best model
-                model.load_state_dict(best_model_state)
-                break
-    
-    return history, model
-
-def evaluate_model(model, test_loader, device):
-    """
-    Evaluate model on test data
-    
-    Args:
-        model: Trained model
-        test_loader: DataLoader for test data
-        device: Device to evaluate on
+            torch.save(model.state_dict(), save_path)
+            print(f"  Saved best model to {save_path}")
         
-    Returns:
-        Dictionary with evaluation metrics
-    """
-    model.eval()
+        end_time = time.time()
+        
+        # Print epoch results
+        print(f"Epoch {epoch+1}/{num_epochs} - "
+              f"Train Loss: {train_loss:.4f}, "
+              f"Val Loss: {val_loss:.4f}, "
+              f"Time: {end_time - start_time:.2f}s")
     
-    all_preds = []
-    all_targets = []
-    mse_loss = nn.MSELoss()
-    total_loss = 0.0
-    
-    with torch.no_grad():
-        for inputs, targets in test_loader:
-            inputs, targets = inputs.to(device), targets.to(device)
-            
-            # Forward pass
-            outputs = model(inputs)
-            
-            # MSE loss calculated across all 4 prediction steps
-            loss = mse_loss(outputs, targets)
-            total_loss += loss.item() * inputs.size(0)
-            
-            # Store predictions and targets
-            all_preds.append(outputs.cpu().numpy())
-            all_targets.append(targets.cpu().numpy())
-    
-    # Calculate average MSE
-    avg_loss = total_loss / len(test_loader.dataset)
-    
-    # Combine all predictions and targets
-    all_preds = np.vstack(all_preds)
-    all_targets = np.vstack(all_targets)
-    
-    # Calculate MSE for each time step
-    step_mse = []
-    for step in range(all_preds.shape[1]):
-        step_mse.append(np.mean((all_preds[:, step] - all_targets[:, step]) ** 2))
-    
-    results = {
-        'mse': avg_loss,
-        'step_mse': step_mse,
-        'predictions': all_preds,
-        'targets': all_targets
-    }
-    
-    return results
-
-def plot_training_history(history):
-    """Plot training history"""
-    plt.figure(figsize=(12, 4))
-    
-    # Plot training and validation loss
-    plt.subplot(1, 1, 1)
-    plt.plot(history['train_loss'], label='Training Loss')
-    plt.plot(history['val_loss'], label='Validation Loss')
-    plt.title('Loss During Training')
-    plt.xlabel('Epoch')
-    plt.ylabel('Mean Squared Error')
-    plt.legend()
-    plt.grid(True)
-    
-    plt.tight_layout()
-    plt.savefig("Transformer/transformer_training_history.png")
-    plt.show()
+    return history
 
 def main():
-    argparser = argparse.ArgumentParser(description="Train a Transformer model for traffic flow prediction")
-    argparser.add_argument('--save_id', type=str, default='test', help='ID for saving the model')
+    # Set device
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    print(f"Using device: {device}")
     
-    args = argparser.parse_args()
+    # Set random seeds for reproducibility
+    torch.manual_seed(42)
+    np.random.seed(42)
+    
+    # Data parameters
+    seq_length = 24  # 6 hours (15-min intervals)
+    pred_length = 4  # 1 hour (15-min intervals)
+    batch_size = 32
+    
+    # Model parameters
+    d_model = 64  # Embedding dimension
+    nhead = 8     # Number of attention heads
+    num_encoder_layers = 3
+    num_decoder_layers = 3
+    dim_feedforward = 256
+    dropout = 0.1
+    
+    # Training parameters
+    num_epochs = 50
+    learning_rate = 0.0001
+    weight_decay = 1e-5
+    
+    # Paths
+    save_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'save_models')
+    os.makedirs(save_dir, exist_ok=True)
+    save_path = os.path.join(save_dir, 'transformer_traffic_model.pth')
+    
+    # Load and prepare data
+    print("Loading and preparing data...")
+    data_collector = TrafficDataCollector()
     
     try:
-        # Load data
-        traffic_flow = load_time_series_data()
-        
-        # Prepare data for supervised learning with explicit feature columns
-        data = traffic_flow.prepare_data_for_training(
-            sequence_length=4,  # Use 4 time steps as input (1 hour)
-            prediction_horizon=4,  # Predict 4 time steps ahead (1 hour)
-            scale_method='standard'  # Standardize data
+        data_loaders = data_collector.get_data_loaders(
+            batch_size=batch_size,
+            shuffle=True,
+            num_workers=0,  # Adjust based on your system
+            random_state=42
         )
         
-        # Show sample data
-        show_sample_data(data)
+        train_loader = data_loaders['train_loader']
+        val_loader = data_loaders['val_loader']
         
-        # Create DataLoaders
-        batch_size = 64
-        dataloaders = create_time_series_dataloaders(data, batch_size=batch_size)
+        # Get input and output dimensions from data
+        X_batch, y_batch = next(iter(train_loader))
+        input_dim = X_batch.shape[2]
+        output_dim = y_batch.shape[2]
         
-        # Get input dimensionality from data
-        input_dim = data['X_train'].shape[-1]  # Number of features
+        print(f"Data loaded successfully:")
+        print(f"  Input shape: [batch_size, seq_length, features] = {X_batch.shape}")
+        print(f"  Output shape: [batch_size, pred_length, features] = {y_batch.shape}")
         
-        # Initialize model
-        d_model = 64  # Hidden dimension
-        num_heads = 8  # Number of attention heads
-        d_ff = 256  # Feed-forward layer dimension
-        num_layers = 2  # Number of transformer layers
-        output_size = 4  # Predicting next 4 time steps (1 hour)
-        dropout = 0.1
-        
-        model = TransformerModel(
+        # Create the Transformer model
+        model = Transformer(
             input_dim=input_dim,
+            output_dim=output_dim,
             d_model=d_model,
-            num_heads=num_heads,
-            d_ff=d_ff,
-            output_size=output_size,
-            num_layers=num_layers,
-            dropout=dropout
+            nhead=nhead,
+            num_encoder_layers=num_encoder_layers,
+            num_decoder_layers=num_decoder_layers,
+            dim_feedforward=dim_feedforward,
+            dropout=dropout,
+            seq_length=seq_length,
+            pred_length=pred_length
         )
         
-        # Setup training
-        learning_rate = 0.001
-        device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-        optimizer = torch.optim.Adam(model.parameters(), lr=learning_rate)
+        # Define loss function and optimizer
+        criterion = nn.MSELoss()
+        optimizer = optim.Adam(model.parameters(), lr=learning_rate, weight_decay=weight_decay)
+        scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='min', factor=0.5, patience=5, verbose=True)
         
-        # Train model
-        print(f"Training model on {device}...")
-        history, trained_model = train_model(
+        # Train the model
+        print("Starting training...")
+        history = train_transformer(
             model=model,
-            train_loader=dataloaders['train'],
-            val_loader=dataloaders['val'],
+            train_loader=train_loader,
+            val_loader=val_loader,
+            criterion=criterion,
             optimizer=optimizer,
+            scheduler=scheduler,
+            num_epochs=num_epochs,
             device=device,
-            num_epochs=30,
-            patience=10,
+            save_path=save_path
         )
-        
-        # Evaluate model
-        results = evaluate_model(
-            model=trained_model,
-            test_loader=dataloaders['test'],
-            device=device
-        )
-        
-        print("\nTraining complete!")
-        print(f"Test MSE: {results['mse']:.4f}")
         
         # Plot training history
-        plot_training_history(history)
+        plt.figure(figsize=(10, 6))
+        plt.plot(history['train_loss'], label='Training Loss')
+        plt.plot(history['val_loss'], label='Validation Loss')
+        plt.xlabel('Epoch')
+        plt.ylabel('Loss')
+        plt.title('Training and Validation Loss')
+        plt.legend()
+        plt.grid(True)
         
-        # Save model
-        torch.save(trained_model.state_dict(), f"Transformer/save_models/transformer_model_{args.save_id}.pth")
-        print(f"Model saved to Transformer/save_models/transformer_model_{args.save_id}.pth")
+        # Save the plot
+        plt.savefig(os.path.join(os.path.dirname(os.path.abspath(__file__)), 'transformer_training_history.png'))
+        plt.show()
         
-    except Exception as e:
-        import traceback
-        print(f"Error in main: {e}")
-        traceback.print_exc()
-        return None, None, None
+        print(f"Training completed. Best model saved to {save_path}")
+        
+    except FileNotFoundError as e:
+        print(f"Error: {e}")
+        print("Please run the transform_traffic_data.py script first to prepare the data.")
+        print(f"Command: python Utils/transform_traffic_data.py")
 
 if __name__ == "__main__":
     main()

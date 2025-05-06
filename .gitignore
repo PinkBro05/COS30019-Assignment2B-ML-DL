@@ -174,3 +174,10 @@ cython_debug/
 .pypirc
 COS30019-2025 S1-A2_B.pdf
 Data/Raw/Data_dictionary.docx
+
+Data/Raw/metadata and excel file/
+Data/Raw/main/20*/
+Data/Transformed/201*.csv
+Data/Transformed/202*.csv
+
+
