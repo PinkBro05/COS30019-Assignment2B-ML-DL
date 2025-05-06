@@ -27,11 +27,38 @@ class PositionalEncoding(nn.Module):
         return x
 
 class TransformerModel(nn.Module):
-    def __init__(self, input_dim, d_model, num_heads, d_ff, output_size=1, num_layers=2, dropout=0.1):
+    def __init__(self, input_dim, d_model, num_heads, d_ff, output_size=1, num_layers=2, dropout=0.1,
+                 categorical_metadata=None, categorical_indices=None):
         super(TransformerModel, self).__init__()
-        # Feature projection layers (instead of embedding)
-        self.encoder_input_projection = nn.Linear(input_dim, d_model)
-        self.decoder_input_projection = nn.Linear(input_dim, d_model)
+        
+        self.categorical_metadata = categorical_metadata
+        self.categorical_indices = categorical_indices
+        
+        # Create embedding layers for categorical features
+        self.embedding_layers = nn.ModuleDict()
+        self.embedding_dims = {}
+        
+        # Initialize embedding layers if categorical metadata is provided
+        if categorical_metadata and categorical_indices:
+            for feature_name, metadata in categorical_metadata.items():
+                num_classes = metadata['num_classes']
+                embedding_dim = metadata['embedding_dim']
+                self.embedding_layers[feature_name] = nn.Embedding(num_classes, embedding_dim)
+                self.embedding_dims[feature_name] = embedding_dim
+        
+        # Calculate the adjusted input dimension (after replacing categorical indices with embeddings)
+        self.input_dim = input_dim
+        if categorical_metadata and categorical_indices:
+            # Remove original categorical feature dimensions and add embedding dimensions
+            for feature_name, metadata in categorical_metadata.items():
+                # Subtract 1 for the categorical index that will be replaced
+                self.input_dim = self.input_dim - 1
+                # Add the embedding dimension
+                self.input_dim = self.input_dim + metadata['embedding_dim']
+        
+        # Feature projection layers
+        self.encoder_input_projection = nn.Linear(self.input_dim, d_model)
+        self.decoder_input_projection = nn.Linear(self.input_dim, d_model)
         
         # Positional encoding
         self.positional_encoding = PositionalEncoding(d_model)
@@ -52,6 +79,52 @@ class TransformerModel(nn.Module):
         self.fc = nn.Linear(d_model, output_size)
         self.dropout = nn.Dropout(dropout)
 
+    def _apply_embeddings(self, x):
+        """
+        Apply embeddings to categorical features in the input tensor
+        
+        Args:
+            x: Input tensor with categorical indices [batch_size, seq_len, input_dim]
+            
+        Returns:
+            Tensor with categorical indices replaced by embeddings
+        """
+        if not (self.categorical_metadata and self.categorical_indices):
+            return x
+        
+        batch_size, seq_len, _ = x.shape
+        
+        # Create a list to store processed features
+        features_list = []
+        
+        # Process each feature in the input
+        for i in range(x.shape[2]):
+            if i in [self.categorical_indices[name] for name in self.categorical_indices]:
+                # Get feature name based on index
+                feature_name = None
+                for name, idx in self.categorical_indices.items():
+                    if idx == i:
+                        feature_name = name
+                        break
+                
+                if feature_name:
+                    # Extract categorical indices
+                    cat_indices = x[:, :, i].long()
+                    
+                    # Apply embedding
+                    embedding = self.embedding_layers[feature_name](cat_indices)
+                    
+                    # Add the embedding to the features list
+                    features_list.append(embedding)
+            else:
+                # For non-categorical features, keep them as is
+                features_list.append(x[:, :, i].unsqueeze(2))
+        
+        # Concatenate all features along the last dimension
+        embedded_x = torch.cat(features_list, dim=2)
+        
+        return embedded_x
+
     def create_masks(self, src_seq_len, tgt_seq_len):
         # Create causal mask for decoder self-attention
         look_ahead_mask = torch.triu(torch.ones(tgt_seq_len, tgt_seq_len), diagonal=1).bool()
@@ -62,6 +135,9 @@ class TransformerModel(nn.Module):
 
     def encode(self, src):
         """Encoder forward pass"""
+        # Apply embeddings to categorical features
+        src = self._apply_embeddings(src)
+        
         # Project input features to d_model dimensions
         src = self.encoder_input_projection(src)
         src = self.positional_encoding(src)
@@ -82,6 +158,9 @@ class TransformerModel(nn.Module):
 
     def decode(self, tgt, enc_output):
         """Decoder forward pass"""
+        # Apply embeddings to categorical features
+        tgt = self._apply_embeddings(tgt)
+        
         # Project input features to d_model dimensions
         tgt = self.decoder_input_projection(tgt)
         tgt = self.positional_encoding(tgt)

@@ -41,14 +41,17 @@ def reshape_traffic_data(input_file, output_file):
     # Convert time_idx (e.g., V00_0, V01_0) to actual time
     long_df['time'] = long_df['time_idx'].apply(create_time_column)
     
-    # Create a composite datetime column by combining date and time
-    long_df['datetime'] = pd.to_datetime(long_df['date'] + ' ' + long_df['time'])
+    # Create a temporary datetime column for sorting purposes only
+    long_df['datetime_temp'] = pd.to_datetime(long_df['date'] + ' ' + long_df['time'])
     
-    # Reorder columns
-    result = long_df[['datetime', 'date', 'time', 'NB_SCATS_SITE', 'scat_type', 'day_type', 'school_count', 'Flow']]
+    # Sort by site and datetime
+    long_df = long_df.sort_values(['NB_SCATS_SITE', 'datetime_temp'])
     
-    # Sort by site, date and time
-    result = result.sort_values(['NB_SCATS_SITE', 'datetime'])
+    # Drop the time_idx and temporary datetime columns
+    long_df = long_df.drop(['time_idx', 'datetime_temp'], axis=1)
+    
+    # Reorder columns for final output
+    result = long_df[['date', 'time', 'NB_SCATS_SITE', 'scat_type', 'day_type', 'school_count', 'Flow']]
     
     print(f"Writing reshaped data to {output_file}...")
     # Write the result to a CSV file
