@@ -80,7 +80,7 @@ The project includes a comprehensive data preprocessing pipeline in the `Utils` 
    ```
 
    This will:
-   - Transform raw SCATS data
+   - Transform **raw SCATS data** (This assume you have downloaded all data from [SCAT](https://opendata.transport.vic.gov.au/dataset/traffic-signal-volume-data), create and name folder by year and extract data to the folder. E.g. `Data/Raw/main/2014` - same for the rest) 
    - Apply feature engineering (add school counts, site types, etc.)
    - Reshape data for time series modeling
    - Output final preprocessed files in the `Data/Transformed` directory
@@ -93,7 +93,7 @@ The project includes a comprehensive data preprocessing pipeline in the `Utils` 
    ```
 
    Available options:
-   - `--data-path`: Custom path to the raw data directory
+   - `--data-path`: Custom path to the raw data directory (`Data/Raw/main/`)
    - `--years`: List of specific years to process (e.g., 2014 2015)
    - `--split`: Split output into separate files for date ranges (2014-2019 and 2020-2024)
    - `--start-date`: Filter data starting from this date (YYYY-MM-DD)
