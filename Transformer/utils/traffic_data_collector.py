@@ -354,6 +354,91 @@ class TrafficDataCollector:
         
         # Restore original shape
         return original_data.reshape(original_shape)
+        
+    def show_sample_data(self, data_loader):
+        """Show a sample of data from the data loader.
+        
+        Args:
+            data_loader: DataLoader object
+            
+        Returns:
+            None
+        """
+        # Get the first batch
+        X_batch, y_batch = next(iter(data_loader))
+        
+        # Convert tensors to numpy for easier handling
+        X_np = X_batch.detach().cpu().numpy()
+        y_np = y_batch.detach().cpu().numpy()
+        
+        # Get encoders and scalers
+        encoders_scalers = data_loader.dataset.categorical_indices
+        
+        # Display only first 3 samples
+        num_samples = min(3, len(X_np))
+        
+        print("\n===== Sample Data Visualization =====")
+        
+        for i in range(num_samples):
+            print(f"\nSample {i+1}:")
+            
+            # Get feature data for the current sample
+            features = X_np[i]
+            target = y_np[i]
+            
+            # Get metadata for better interpretation
+            if hasattr(self, 'metadata') and self.metadata:
+                feature_cols = self.metadata.get('feature_cols', [])
+            else:
+                feature_cols = [f"Feature_{j}" for j in range(features.shape[1])]
+            
+            # Display sequence information
+            print(f"  Sequence length: {features.shape[0]} time steps")
+            print(f"  Features per time step: {features.shape[1]}")
+            
+            # Display processed features from the first time step
+            print("\n  First time step (processed features):")
+            for j, col in enumerate(feature_cols):
+                if j < features.shape[1]:  # Make sure we don't go out of bounds
+                    print(f"    {col}: {features[0, j]:.4f}")
+            
+            # Display last time step
+            print("\n  Last time step (processed features):")
+            for j, col in enumerate(feature_cols):
+                if j < features.shape[1]:  # Make sure we don't go out of bounds
+                    print(f"    {col}: {features[-1, j]:.4f}")
+            
+            # Display target values (processed)
+            print("\n  Target sequence (processed):")
+            for j in range(len(target)):
+                print(f"    t+{j+1}: {target[j]:.4f}")
+            
+            # Display original flow values if possible
+            if hasattr(self, 'flow_scaler') and self.flow_scaler is not None:
+                try:
+                    # Original flow value for the last input time step
+                    last_flow_processed = features[-1, feature_cols.index('Flow_scaled')]
+                    last_flow_original = self.inverse_transform_flow(
+                        np.array([last_flow_processed]), 
+                        {'flow_scaler': self.flow_scaler}
+                    )[0]
+                    
+                    # Original flow values for targets
+                    target_original = self.inverse_transform_flow(
+                        target, 
+                        {'flow_scaler': self.flow_scaler}
+                    )
+                    
+                    print("\n  Original values (inverse transformed):")
+                    print(f"    Last input flow: {last_flow_original:.2f} vehicles")
+                    print("    Target flows:")
+                    for j in range(len(target_original)):
+                        print(f"      t+{j+1}: {target_original[j]:.2f} vehicles")
+                        
+                except (ValueError, IndexError) as e:
+                    print(f"\n  Could not display original values: {e}")
+            
+            print("\n" + "-" * 40)
 
 # Example usage
 if __name__ == "__main__":
@@ -362,7 +447,7 @@ if __name__ == "__main__":
     
     try:
         # Get data loaders directly from CSV file
-        data_file = os.path.join(data_collector.data_path, 'sample_long_format_revised.csv')
+        data_file = os.path.join(data_collector.data_path, 'sample_long_format.csv')
         data = data_collector.get_data_loaders(data_file, batch_size=32)
         
         # Print some information about the data
@@ -384,6 +469,9 @@ if __name__ == "__main__":
         print("\nCategorical Feature Metadata:")
         for feature, metadata in categorical_metadata.items():
             print(f"  {feature}: {metadata['num_classes']} classes, embedding dim={metadata['embedding_dim']}")
+
+        # Show a sample of data
+        data_collector.show_sample_data(train_loader)
         
     except FileNotFoundError as e:
         print(f"Error: {e}")
