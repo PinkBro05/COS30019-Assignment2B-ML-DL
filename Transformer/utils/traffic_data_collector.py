@@ -724,12 +724,10 @@ if __name__ == "__main__":
         # Print some information about the data
         train_loader = data['train_loader']
         val_loader = data['val_loader']
-        test_loader = data['test_loader']
         categorical_metadata = data['categorical_metadata']
         
         print(f"Number of training batches: {len(train_loader)}")
         print(f"Number of validation batches: {len(val_loader)}")
-        print(f"Number of testing batches: {len(test_loader)}")
         
         # Get a batch from the training loader
         X_batch, y_batch = next(iter(train_loader))
