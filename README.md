@@ -123,11 +123,11 @@ The project includes a comprehensive data preprocessing pipeline in the `Utils` 
 
    The complete preprocessing workflow includes:
    
-   a. **Raw Data Transformation**: Converts raw SCATS data to a structured format
+   a. **Raw Data Transformation**: Converts raw SCATS data to a structured format\\
    b. **Feature Engineering**: Adds contextual features:
       - School counts near each SCATS site
       - Traffic light and SCATS site types
-      - Public holiday information
+      - Public holiday information\\
    c. **Time Series Reshaping**: Formats data for sequence prediction tasks
 
 ### Training a Model
