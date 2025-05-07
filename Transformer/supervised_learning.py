@@ -319,7 +319,7 @@ def parse_args():
     # Training parameters
     parser.add_argument('--num_epochs', type=int, default=50,
                         help='Number of training epochs')
-    parser.add_argument('--learning_rate', type=float, default=0.0001,
+    parser.add_argument('--learning_rate', type=float, default=0.00001,
                         help='Learning rate')
     parser.add_argument('--weight_decay', type=float, default=1e-5,
                         help='Weight decay for optimizer')
@@ -794,7 +794,7 @@ def main():
                 scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='min', factor=0.5, patience=5, verbose=True)
                 
                 # Define max_grad_norm for gradient clipping
-                max_grad_norm = 1.0
+                max_grad_norm = 0.5
                 
                 # Train the model
                 print("Starting training...")

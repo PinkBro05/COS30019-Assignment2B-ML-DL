@@ -57,7 +57,7 @@ class MultiHeadAttention(nn.Module):
         # K: (batch_size, nhead, seq_len, d_k)
         # K.transpose: (batch_size, nhead, d_k, seq_len)
         # QK: (batch_size, nhead, seq_len, seq_len)
-        scores = torch.matmul(Q, K.transpose(-2, -1)) / math.sqrt(self.d_k)
+        scores = torch.matmul(Q, K.transpose(-2, -1)) / (math.sqrt(self.d_k) + 1e-8)
         
         # Apply mask if provided
         if mask is not None:
@@ -71,6 +71,10 @@ class MultiHeadAttention(nn.Module):
             elif mask.dim() == 3:
                 # Different mask for each batch: (batch_size, seq_len, seq_len)
                 scores = scores.masked_fill(mask.unsqueeze(1), -1e9)
+                
+        # IMPROVED: Apply numerical stability by subtracting max value before softmax
+        scores_max, _ = scores.max(dim=-1, keepdim=True)
+        scores = scores - scores_max
                 
         # Apply softmax to get attention weights
         attn_weights = F.softmax(scores, dim=-1)

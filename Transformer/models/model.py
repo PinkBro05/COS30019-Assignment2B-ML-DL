@@ -178,8 +178,8 @@ class TransformerModel(nn.Module):
         for layer in self.decoder_layers:
             dec_output = layer(dec_output, enc_output, look_ahead_mask)
             
-        # Global average pooling across sequence dimension
-        dec_output = dec_output.mean(dim=1)
+        # Global average pooling across sequence dimension with added epsilon for numerical stability
+        dec_output = dec_output.sum(dim=1) / (tgt.size(1) + 1e-10)
         
         # Final projection to output dimension
         output = self.fc(self.dropout(dec_output))
