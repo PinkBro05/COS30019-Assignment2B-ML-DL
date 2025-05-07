@@ -407,140 +407,415 @@ def main():
         # Create data collector
         data_collector = TrafficDataCollector(embedding_dim=args.embedding_dim)
         
-        # Load data
-        print(f"Loading data from {args.data_file}...")
-        data_loaders = data_collector.get_data_loaders(
-            data_file=args.data_file,
-            batch_size=args.batch_size,
-            shuffle=args.shuffle,
-            num_workers=args.num_workers,
-            train_ratio=args.train_ratio,
-            val_ratio=args.val_ratio,
-            test_ratio=args.test_ratio,
-            random_state=args.random_seed
-        )
-        
-        train_loader = data_loaders['train_loader']
-        val_loader = data_loaders['val_loader']
-        test_loader = data_loaders['test_loader']
-        categorical_indices = data_loaders['categorical_indices']
-        categorical_metadata = data_loaders['categorical_metadata']
-        encoders_scalers = data_loaders['encoders_scalers']
-        
-        # Get input dimension from data
-        X_batch, y_batch = next(iter(train_loader))
-        input_dim = X_batch.shape[2]
-        output_size = 1  # We're predicting Flow only
-        
-        print(f"Data loaded successfully:")
-        print(f"  Input shape: [batch_size, seq_length, features] = {X_batch.shape}")
-        print(f"  Output shape: [batch_size, pred_length] = {y_batch.shape}")
-        
-        # Print categorical features info
-        print("\nCategorical features:")
-        for feature, metadata in categorical_metadata.items():
-            print(f"  {feature}: {metadata['num_classes']} classes, embedding dim={metadata['embedding_dim']}")
-        
-        # Create the Transformer model with categorical embeddings
-        model = TransformerModel(
-            input_dim=input_dim,
-            d_model=args.d_model,
-            num_heads=args.num_heads,
-            d_ff=args.d_ff,
-            output_size=output_size,
-            num_layers=args.num_layers,
-            dropout=args.dropout,
-            categorical_metadata=categorical_metadata,
-            categorical_indices=categorical_indices
-        )
-        
-        # Define loss function
-        criterion = nn.MSELoss()
-        
-        # Check if we're in test mode
-        if args.test:
-            # Set model path if not provided
-            if args.model_path is None:
-                args.model_path = save_path
-                
-            # Check if model exists
-            if not os.path.exists(args.model_path):
-                raise FileNotFoundError(f"Model file not found at {args.model_path}")
-                
-            print(f"Loading model from {args.model_path} for testing...")
-            model.load_state_dict(torch.load(args.model_path, map_location=device))
+        # Check if using chunking or regular approach
+        if args.use_chunking:
+            print(f"Using chunking mode to process large dataset from {args.data_file}...")
+            print(f"Chunk size: {args.chunk_size} rows")
             
-            # Test the model
-            print("Testing the model...")
-            test_metrics = test_transformer(
-                model=model,
-                test_loader=test_loader,
-                criterion=criterion,
-                device=device,
-                flow_scaler=encoders_scalers['flow_scaler']
+            # Initialize encoders by pre-scanning the dataset once before starting any epoch
+            print("Pre-scanning dataset to fit encoders and scalers...")
+            data_collector._initialize_encoders_on_full_dataset(args.data_file)
+            
+            # First, we need to initialize the model
+            # For this, we need to process a small chunk to get the metadata
+            chunk_generator = data_collector.process_data_in_chunks(
+                input_file=args.data_file,
+                chunk_size=args.chunk_size,
+                initialize_encoders=False  # Skip encoder initialization since we did it above
             )
             
-            # Plot test results if requested
-            if args.plot_test_results and 'predictions' in test_metrics and 'actuals' in test_metrics:
-                test_plot_path = os.path.join(figures_dir, args.test_plot_name)
-                plot_test_results(
-                    test_metrics['predictions'],
-                    test_metrics['actuals'],
-                    test_plot_path
+            # Get the first chunk to initialize the model
+            try:
+                first_chunk = next(chunk_generator)
+                categorical_indices = first_chunk['categorical_indices']
+                categorical_metadata = first_chunk['categorical_metadata']
+                input_dim = first_chunk['input_dim']
+                
+                print("Model initialization data loaded from first chunk:")
+                print(f"  Input dimension: {input_dim}")
+                
+                # Print categorical features info
+                print("\nCategorical features:")
+                for feature, metadata in categorical_metadata.items():
+                    print(f"  {feature}: {metadata['num_classes']} classes, embedding dim={metadata['embedding_dim']}")
+                
+                # Create the Transformer model with categorical embeddings
+                model = TransformerModel(
+                    input_dim=input_dim,
+                    d_model=args.d_model,
+                    num_heads=args.num_heads,
+                    d_ff=args.d_ff,
+                    output_size=1,  # Predicting Flow only
+                    num_layers=args.num_layers,
+                    dropout=args.dropout,
+                    categorical_metadata=categorical_metadata,
+                    categorical_indices=categorical_indices
                 )
                 
-            print("Testing completed.")
-            
+                # Define loss function, optimizer, and scheduler
+                criterion = nn.MSELoss()
+                optimizer = optim.Adam(model.parameters(), lr=args.learning_rate, weight_decay=args.weight_decay)
+                scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='min', factor=0.5, patience=5, verbose=True)
+                
+                # Initialize history dictionary to track training progress
+                history = {
+                    'train_loss': [],
+                    'val_loss': [],
+                    'learning_rate': []
+                }
+                
+                best_val_loss = float('inf')
+                
+                # Training loop
+                for epoch in range(args.num_epochs):
+                    print(f"\n{'='*20} Epoch {epoch+1}/{args.num_epochs} {'='*20}")
+                    
+                    # Reset data generator for each epoch
+                    chunk_generator = data_collector.process_data_in_chunks(
+                        input_file=args.data_file,
+                        chunk_size=args.chunk_size,
+                        initialize_encoders=False  # Skip encoder initialization since we did it before the loop
+                    )
+                    
+                    epoch_train_loss = 0.0
+                    epoch_val_loss = 0.0
+                    epoch_chunks = 0
+                    
+                    # Train and validate on each chunk in this epoch
+                    for chunk_data in chunk_generator:
+                        chunk_id = chunk_data['chunk_id']
+                        print(f"\nProcessing chunk {chunk_id} in epoch {epoch+1}")
+                        
+                        # Get data loaders for this chunk
+                        data_loaders = data_collector.get_data_loaders_from_chunk(
+                            chunk_data=chunk_data,
+                            batch_size=args.batch_size,
+                            shuffle=args.shuffle,
+                            num_workers=args.num_workers,
+                            train_ratio=args.train_ratio,
+                            val_ratio=args.val_ratio,
+                            test_ratio=args.test_ratio,
+                            random_state=args.random_seed
+                        )
+                        
+                        train_loader = data_loaders['train_loader']
+                        val_loader = data_loaders['val_loader']
+                        
+                        # Skip chunks with no data
+                        if len(train_loader) == 0 or len(val_loader) == 0:
+                            print(f"Chunk {chunk_id} has no data, skipping...")
+                            continue
+                        
+                        epoch_chunks += 1
+                        
+                        # Training on current chunk
+                        model.train()
+                        chunk_train_loss = 0.0
+                        
+                        for X_batch, y_batch in train_loader:
+                            X_batch, y_batch = X_batch.to(device), y_batch.to(device)
+                            
+                            # Get prediction length from target
+                            pred_len = y_batch.size(1)
+                            
+                            # Forward pass with autoregressive prediction
+                            outputs = model(X_batch, pred_len=pred_len)
+                            
+                            # Compute loss
+                            loss = criterion(outputs, y_batch)
+                            
+                            # Backward and optimize
+                            optimizer.zero_grad()
+                            loss.backward()
+                            optimizer.step()
+                            
+                            chunk_train_loss += loss.item()
+                        
+                        # Calculate average training loss for this chunk
+                        chunk_train_loss /= len(train_loader)
+                        epoch_train_loss += chunk_train_loss
+                        
+                        # Validation on current chunk
+                        model.eval()
+                        chunk_val_loss = 0.0
+                        
+                        with torch.no_grad():
+                            for X_batch, y_batch in val_loader:
+                                X_batch, y_batch = X_batch.to(device), y_batch.to(device)
+                                
+                                # Get prediction length from target
+                                pred_len = y_batch.size(1)
+                                
+                                # Forward pass with autoregressive prediction
+                                outputs = model(X_batch, pred_len=pred_len)
+                                
+                                # Compute loss
+                                loss = criterion(outputs, y_batch)
+                                
+                                chunk_val_loss += loss.item()
+                        
+                        # Calculate average validation loss for this chunk
+                        chunk_val_loss /= len(val_loader)
+                        epoch_val_loss += chunk_val_loss
+                        
+                        # Print chunk results
+                        print(f"Chunk {chunk_id} - Train Loss: {chunk_train_loss:.6f}, Val Loss: {chunk_val_loss:.6f}")
+                    
+                    # Skip epochs with no chunks processed
+                    if epoch_chunks == 0:
+                        print(f"No chunks were processed in epoch {epoch+1}, skipping...")
+                        continue
+                    
+                    # Calculate average losses across all chunks for this epoch
+                    epoch_train_loss /= epoch_chunks
+                    epoch_val_loss /= epoch_chunks
+                    
+                    # Get current learning rate
+                    current_lr = optimizer.param_groups[0]['lr']
+                    
+                    # Update history
+                    history['train_loss'].append(epoch_train_loss)
+                    history['val_loss'].append(epoch_val_loss)
+                    history['learning_rate'].append(current_lr)
+                    
+                    # Learning rate scheduling
+                    if scheduler:
+                        scheduler.step(epoch_val_loss)
+                    
+                    # Print epoch results
+                    print(f"\nEpoch {epoch+1} Summary - Train Loss: {epoch_train_loss:.6f}, Val Loss: {epoch_val_loss:.6f}")
+                    print(f"Learning Rate: {current_lr:.8f}")
+                    
+                    # Save the best model
+                    if epoch_val_loss < best_val_loss and save_path:
+                        print(f"Validation loss improved from {best_val_loss:.6f} to {epoch_val_loss:.6f}")
+                        print(f"Saving model to {save_path}")
+                        best_val_loss = epoch_val_loss
+                        torch.save(model.state_dict(), save_path)
+                    else:
+                        print(f"Validation loss not improved - best: {best_val_loss:.6f}")
+                
+                # Plot training history
+                if not args.no_plot and history['train_loss'] and history['val_loss']:
+                    # Create subplot figure with 2 plots - loss and learning rate
+                    fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(12, 8), gridspec_kw={'height_ratios': [2, 1]})
+                    
+                    # Plot 1: Loss During Training
+                    ax1.plot(history['train_loss'], label='Training Loss', color='blue')
+                    ax1.plot(history['val_loss'], label='Validation Loss', color='orange')
+                    ax1.set_xlabel('Epoch')
+                    ax1.set_ylabel('Mean Squared Error')
+                    ax1.set_title('Loss During Training')
+                    ax1.legend()
+                    ax1.grid(True)
+                    
+                    # Plot 2: Learning Rate
+                    ax2.semilogy(history['learning_rate'], color='red')
+                    ax2.set_xlabel('Epoch')
+                    ax2.set_ylabel('Learning Rate')
+                    ax2.set_title('Learning Rate')
+                    ax2.grid(True)
+                    
+                    # Adjust layout
+                    plt.tight_layout()
+                    
+                    # Save the plot
+                    plot_path = os.path.join(figures_dir, args.plot_name)
+                    plt.savefig(plot_path)
+                    print(f"Training plot saved to {plot_path}")
+                    plt.show()
+                
+                # Testing mode (if requested)
+                if args.test:
+                    # Load best model
+                    model_path = args.model_path if args.model_path else save_path
+                    print(f"Loading best model from {model_path} for testing...")
+                    model.load_state_dict(torch.load(model_path, map_location=device))
+                    
+                    # Get a chunk for testing
+                    test_chunk_generator = data_collector.process_data_in_chunks(
+                        input_file=args.data_file,
+                        chunk_size=args.chunk_size,
+                        initialize_encoders=False  # Skip encoder initialization
+                    )
+                    
+                    # Use the first chunk that has data
+                    test_chunk = next(test_chunk_generator)
+                    test_loaders = data_collector.get_data_loaders_from_chunk(
+                        chunk_data=test_chunk,
+                        batch_size=args.batch_size,
+                        shuffle=False,
+                        num_workers=args.num_workers,
+                        train_ratio=0,
+                        val_ratio=0,
+                        test_ratio=1,
+                        random_state=args.random_seed
+                    )
+                    
+                    # Get test loader and encoders/scalers
+                    test_loader = test_loaders['test_loader']
+                    encoders_scalers = test_loaders['encoders_scalers']
+                    
+                    # Test the model
+                    print("Testing the model...")
+                    test_metrics = test_transformer(
+                        model=model,
+                        test_loader=test_loader,
+                        criterion=criterion,
+                        device=device,
+                        flow_scaler=encoders_scalers['flow_scaler']
+                    )
+                    
+                    # Plot test results if requested
+                    if args.plot_test_results and 'predictions' in test_metrics and 'actuals' in test_metrics:
+                        test_plot_path = os.path.join(figures_dir, args.test_plot_name)
+                        plot_test_results(
+                            test_metrics['predictions'],
+                            test_metrics['actuals'],
+                            test_plot_path
+                        )
+                
+                print("Training completed successfully.")
+                
+            except StopIteration:
+                print("Error: No data chunks were generated. Please check your input file.")
+                return
+                
         else:
-            # Define optimizer and scheduler for training mode
-            optimizer = optim.Adam(model.parameters(), lr=args.learning_rate, weight_decay=args.weight_decay)
-            scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='min', factor=0.5, patience=5, verbose=True)
-            
-            # Train the model
-            print("Starting training...")
-            history = train_transformer(
-                model=model,
-                train_loader=train_loader,
-                val_loader=val_loader,
-                criterion=criterion,
-                optimizer=optimizer,
-                scheduler=scheduler,
-                num_epochs=args.num_epochs,
-                device=device,
-                save_path=save_path
+            # Regular training approach (non-chunked)
+            print(f"Loading data from {args.data_file}...")
+            data_loaders = data_collector.get_data_loaders(
+                data_file=args.data_file,
+                batch_size=args.batch_size,
+                shuffle=args.shuffle,
+                num_workers=args.num_workers,
+                train_ratio=args.train_ratio,
+                val_ratio=args.val_ratio,
+                test_ratio=args.test_ratio,
+                random_state=args.random_seed
             )
             
-            # Plot training history
-            if not args.no_plot:
-                # Create subplot figure with 2 plots - loss and learning rate
-                fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(12, 8), gridspec_kw={'height_ratios': [2, 1]})
-                
-                # Plot 1: Loss During Training
-                ax1.plot(history['train_loss'], label='Training Loss', color='blue')
-                ax1.plot(history['val_loss'], label='Validation Loss', color='orange')
-                ax1.set_xlabel('Epoch')
-                ax1.set_ylabel('Mean Squared Error')
-                ax1.set_title('Loss During Training')
-                ax1.legend()
-                ax1.grid(True)
-                
-                # Plot 2: Learning Rate
-                ax2.semilogy(history['learning_rate'], color='red')
-                ax2.set_xlabel('Epoch')
-                ax2.set_ylabel('Learning Rate')
-                ax2.set_title('Learning Rate')
-                ax2.grid(True)
-                
-                # Adjust layout
-                plt.tight_layout()
-                
-                # Save the plot
-                plot_path = os.path.join(figures_dir, args.plot_name)
-                plt.savefig(plot_path)
-                print(f"Training plot saved to {plot_path}")
-                plt.show()
+            train_loader = data_loaders['train_loader']
+            val_loader = data_loaders['val_loader']
+            test_loader = data_loaders['test_loader']
+            categorical_indices = data_loaders['categorical_indices']
+            categorical_metadata = data_loaders['categorical_metadata']
+            encoders_scalers = data_loaders['encoders_scalers']
             
-            print(f"Training completed. Best model saved to {save_path}")
+            # Get input dimension from data
+            X_batch, y_batch = next(iter(train_loader))
+            input_dim = X_batch.shape[2]
+            output_size = 1  # We're predicting Flow only
+            
+            print(f"Data loaded successfully:")
+            print(f"  Input shape: [batch_size, seq_length, features] = {X_batch.shape}")
+            print(f"  Output shape: [batch_size, pred_length] = {y_batch.shape}")
+            
+            # Print categorical features info
+            print("\nCategorical features:")
+            for feature, metadata in categorical_metadata.items():
+                print(f"  {feature}: {metadata['num_classes']} classes, embedding dim={metadata['embedding_dim']}")
+            
+            # Create the Transformer model with categorical embeddings
+            model = TransformerModel(
+                input_dim=input_dim,
+                d_model=args.d_model,
+                num_heads=args.num_heads,
+                d_ff=args.d_ff,
+                output_size=output_size,
+                num_layers=args.num_layers,
+                dropout=args.dropout,
+                categorical_metadata=categorical_metadata,
+                categorical_indices=categorical_indices
+            )
+            
+            # Define loss function
+            criterion = nn.MSELoss()
+            
+            # Check if we're in test mode
+            if args.test:
+                # Set model path if not provided
+                if args.model_path is None:
+                    args.model_path = save_path
+                    
+                # Check if model exists
+                if not os.path.exists(args.model_path):
+                    raise FileNotFoundError(f"Model file not found at {args.model_path}")
+                    
+                print(f"Loading model from {args.model_path} for testing...")
+                model.load_state_dict(torch.load(args.model_path, map_location=device))
+                
+                # Test the model
+                print("Testing the model...")
+                test_metrics = test_transformer(
+                    model=model,
+                    test_loader=test_loader,
+                    criterion=criterion,
+                    device=device,
+                    flow_scaler=encoders_scalers['flow_scaler']
+                )
+                
+                # Plot test results if requested
+                if args.plot_test_results and 'predictions' in test_metrics and 'actuals' in test_metrics:
+                    test_plot_path = os.path.join(figures_dir, args.test_plot_name)
+                    plot_test_results(
+                        test_metrics['predictions'],
+                        test_metrics['actuals'],
+                        test_plot_path
+                    )
+                    
+                print("Testing completed.")
+                
+            else:
+                # Define optimizer and scheduler for training mode
+                optimizer = optim.Adam(model.parameters(), lr=args.learning_rate, weight_decay=args.weight_decay)
+                scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='min', factor=0.5, patience=5, verbose=True)
+                
+                # Train the model
+                print("Starting training...")
+                history = train_transformer(
+                    model=model,
+                    train_loader=train_loader,
+                    val_loader=val_loader,
+                    criterion=criterion,
+                    optimizer=optimizer,
+                    scheduler=scheduler,
+                    num_epochs=args.num_epochs,
+                    device=device,
+                    save_path=save_path
+                )
+                
+                # Plot training history
+                if not args.no_plot:
+                    # Create subplot figure with 2 plots - loss and learning rate
+                    fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(12, 8), gridspec_kw={'height_ratios': [2, 1]})
+                    
+                    # Plot 1: Loss During Training
+                    ax1.plot(history['train_loss'], label='Training Loss', color='blue')
+                    ax1.plot(history['val_loss'], label='Validation Loss', color='orange')
+                    ax1.set_xlabel('Epoch')
+                    ax1.set_ylabel('Mean Squared Error')
+                    ax1.set_title('Loss During Training')
+                    ax1.legend()
+                    ax1.grid(True)
+                    
+                    # Plot 2: Learning Rate
+                    ax2.semilogy(history['learning_rate'], color='red')
+                    ax2.set_xlabel('Epoch')
+                    ax2.set_ylabel('Learning Rate')
+                    ax2.set_title('Learning Rate')
+                    ax2.grid(True)
+                    
+                    # Adjust layout
+                    plt.tight_layout()
+                    
+                    # Save the plot
+                    plot_path = os.path.join(figures_dir, args.plot_name)
+                    plt.savefig(plot_path)
+                    print(f"Training plot saved to {plot_path}")
+                    plt.show()
+                
+                print(f"Training completed. Best model saved to {save_path}")
         
     except FileNotFoundError as e:
         print(f"Error: {e}")

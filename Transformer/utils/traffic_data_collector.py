@@ -238,6 +238,281 @@ class TrafficDataCollector:
         
         return data
     
+    def process_data_in_chunks(self, input_file, chunk_size=100000, seq_len=24, pred_len=4, step_size=4, initialize_encoders=True):
+        """Process data from a CSV file in chunks to handle large datasets.
+        
+        Args:
+            input_file: Path to the CSV file
+            chunk_size: Number of rows to process in each chunk
+            seq_len: Length of input sequence (in time steps)
+            pred_len: Length of prediction sequence (in time steps)
+            step_size: Step size for sliding window
+            initialize_encoders: Whether to initialize encoders by scanning the full dataset first
+            
+        Returns:
+            Generator that yields processed data chunks
+        """
+        # Check if file exists
+        if not os.path.exists(input_file):
+            raise FileNotFoundError(f"CSV file not found at {input_file}")
+        
+        # Initialize encoders for consistent transformations across chunks
+        # This should only be done once before processing any chunks
+        if initialize_encoders:
+            self._initialize_encoders_on_full_dataset(input_file)
+        
+        # Create chunks using pandas
+        chunk_reader = pd.read_csv(input_file, chunksize=chunk_size)
+        chunk_count = 0
+        
+        # Process each chunk
+        for chunk_df in chunk_reader:
+            chunk_count += 1
+            print(f"Processing chunk {chunk_count}, size: {len(chunk_df)} rows")
+            
+            try:
+                # Create cyclical features for date and time
+                chunk_df = self._create_cyclical_features(chunk_df)
+                
+                # Process categorical features using pre-fitted encoders
+                # 1. NB_SCATS_SITE encoding
+                chunk_df['NB_SCATS_SITE_encoded'] = self.site_encoder.transform(chunk_df['NB_SCATS_SITE'])
+                site_classes = len(self.site_encoder.classes_)
+                
+                # 2. scat_type encoding
+                chunk_df['scat_type_encoded'] = self.scat_type_encoder.transform(chunk_df['scat_type'])
+                scat_type_classes = len(self.scat_type_encoder.classes_)
+                
+                # 3. day_type encoding
+                chunk_df['day_type_encoded'] = self.day_type_encoder.transform(chunk_df['day_type'])
+                day_type_classes = len(self.day_type_encoder.classes_)
+                
+                # 4. Standardize numerical features using pre-fitted scalers
+                chunk_df['school_count_scaled'] = self.school_count_scaler.transform(chunk_df[['school_count']])
+                chunk_df['Flow_scaled'] = self.flow_scaler.transform(chunk_df[['Flow']])
+                
+                # Create feature columns list
+                feature_cols = [
+                    'day_of_week_sin', 'day_of_week_cos',  # Date features
+                    'month_sin', 'month_cos',
+                    'hour_sin', 'hour_cos',  # Time features
+                    'minute_sin', 'minute_cos',
+                    'NB_SCATS_SITE_encoded',  # Site ID (will be embedded in the model)
+                    'scat_type_encoded',  # Scat type
+                    'day_type_encoded',  # Day type (will be embedded in the model)
+                    'school_count_scaled',  # Standardized school count
+                    'Flow_scaled'  # Standardized flow (target)
+                ]
+                
+                # Define categorical feature indices and metadata (same for all chunks)
+                categorical_indices = {
+                    'NB_SCATS_SITE': feature_cols.index('NB_SCATS_SITE_encoded'),
+                    'day_type': feature_cols.index('day_type_encoded')
+                }
+                
+                categorical_metadata = {
+                    'NB_SCATS_SITE': {
+                        'num_classes': site_classes,
+                        'embedding_dim': self.embedding_dim
+                    },
+                    'day_type': {
+                        'num_classes': day_type_classes,
+                        'embedding_dim': self.embedding_dim
+                    }
+                }
+                
+                # Select features for modeling
+                df_features = chunk_df[feature_cols].copy()
+                
+                # Get unique sites in this chunk and sort chronologically
+                unique_sites = chunk_df['NB_SCATS_SITE'].unique()
+                chunk_df['date_time'] = pd.to_datetime(chunk_df['date'] + ' ' + chunk_df['time'])
+                
+                # Create sequences for each site
+                X_list = []
+                y_list = []
+                sites_list = []
+                dates_list = []
+                
+                for site in unique_sites:
+                    site_data = chunk_df[chunk_df['NB_SCATS_SITE'] == site].sort_values('date_time')
+                    site_features = df_features[chunk_df['NB_SCATS_SITE'] == site].values
+                    
+                    # Create sequences only if we have enough data points
+                    if len(site_features) >= seq_len + pred_len:
+                        for i in range(0, len(site_features) - seq_len - pred_len + 1, step_size):
+                            X_list.append(site_features[i:i+seq_len])
+                            y_list.append(site_features[i+seq_len:i+seq_len+pred_len, -1])  # Only predict Flow
+                            sites_list.append(site)
+                            dates_list.append(site_data.iloc[i+seq_len]['date_time'])
+                
+                # Skip empty chunks
+                if not X_list:
+                    print(f"Chunk {chunk_count} generated no sequences, skipping")
+                    continue
+                
+                # Convert to numpy arrays
+                X = np.array(X_list)
+                y = np.array(y_list)
+                sites = np.array(sites_list)
+                dates = np.array(dates_list)
+                
+                print(f"Chunk {chunk_count} created {len(X)} sequences: X shape={X.shape}, y shape={y.shape}")
+                
+                # Calculate additional metadata for the model
+                input_dim = X.shape[2]  # Number of features
+                output_dim = 1  # Predicting Flow only
+                
+                # Store the encoders and scalers for later use
+                encoders_scalers = {
+                    'site_encoder': self.site_encoder,
+                    'scat_type_encoder': self.scat_type_encoder,
+                    'day_type_encoder': self.day_type_encoder,
+                    'school_count_scaler': self.school_count_scaler,
+                    'flow_scaler': self.flow_scaler
+                }
+                
+                # Store metadata for current chunk
+                chunk_metadata = {
+                    'sites': sites,
+                    'dates': dates,
+                    'feature_cols': feature_cols,
+                    'chunk_id': chunk_count
+                }
+                
+                # Update the metadata with current chunk info
+                self.metadata.update(chunk_metadata)
+                
+                # Prepare data dictionary for this chunk
+                chunk_data = {
+                    'X': X,
+                    'y': y,
+                    'encoders_scalers': encoders_scalers,
+                    'categorical_indices': categorical_indices,
+                    'categorical_metadata': categorical_metadata,
+                    'input_dim': input_dim,
+                    'output_dim': output_dim,
+                    'chunk_id': chunk_count
+                }
+                
+                yield chunk_data
+                
+            except Exception as e:
+                print(f"Error processing chunk {chunk_count}: {e}")
+                continue
+    
+    def _initialize_encoders_on_full_dataset(self, input_file):
+        """Initialize and fit encoders and scalers on the full dataset.
+        
+        This ensures consistent encoding across all chunks.
+        
+        Args:
+            input_file: Path to the CSV file
+        """
+        print("Pre-scanning dataset to fit encoders and scalers...")
+        
+        # Get unique categorical values and statistics for continuous variables
+        # Read only necessary columns to save memory
+        columns_for_encoding = ['NB_SCATS_SITE', 'scat_type', 'day_type', 'school_count', 'Flow']
+        
+        # Use pandas to read specific columns
+        categorical_data = pd.read_csv(input_file, usecols=columns_for_encoding)
+        
+        # Fit encoders on the entire dataset
+        self.site_encoder.fit(categorical_data['NB_SCATS_SITE'])
+        self.scat_type_encoder.fit(categorical_data['scat_type'])
+        self.day_type_encoder.fit(categorical_data['day_type'])
+        
+        # Fit scalers on the entire dataset
+        self.school_count_scaler.fit(categorical_data[['school_count']])
+        self.flow_scaler.fit(categorical_data[['Flow']])
+        
+        print("Encoders and scalers fitted on the full dataset.")
+        print(f"Number of unique sites: {len(self.site_encoder.classes_)}")
+        print(f"Number of scat types: {len(self.scat_type_encoder.classes_)}")
+        print(f"Number of day types: {len(self.day_type_encoder.classes_)}")
+    
+    def get_data_loaders_from_chunk(self, chunk_data, batch_size=32, shuffle=True, num_workers=0,
+                                   train_ratio=0.7, val_ratio=0.15, test_ratio=0.15, random_state=42):
+        """Create data loaders from a processed data chunk.
+        
+        Args:
+            chunk_data: Dictionary with processed chunk data
+            batch_size: Batch size for dataloaders
+            shuffle: Whether to shuffle the data
+            num_workers: Number of workers for dataloaders
+            train_ratio: Ratio of training data
+            val_ratio: Ratio of validation data
+            test_ratio: Ratio of test data
+            random_state: Random seed for reproducibility
+            
+        Returns:
+            Dictionary with data loaders and metadata
+        """
+        X, y = chunk_data['X'], y = chunk_data['y']
+        categorical_indices = chunk_data['categorical_indices']
+        categorical_metadata = chunk_data['categorical_metadata']
+        
+        # Set random seed for reproducibility
+        np.random.seed(random_state)
+        
+        # Get dataset size
+        n_samples = len(X)
+        
+        # Create indices for train/val/test split
+        indices = np.random.permutation(n_samples)
+        train_size = int(train_ratio * n_samples)
+        val_size = int(val_ratio * n_samples)
+        
+        train_indices = indices[:train_size]
+        val_indices = indices[train_size:train_size + val_size]
+        test_indices = indices[train_size + val_size:]
+        
+        # Extract train, validation, and test sets
+        X_train, y_train = X[train_indices], y[train_indices]
+        X_val, y_val = X[val_indices], y[val_indices]
+        X_test, y_test = X[test_indices], y[test_indices]
+        
+        # Create datasets
+        train_dataset = TrafficDataset(X_train, y_train, categorical_indices)
+        val_dataset = TrafficDataset(X_val, y_val, categorical_indices)
+        test_dataset = TrafficDataset(X_test, y_test, categorical_indices)
+        
+        # Create data loaders
+        train_loader = DataLoader(
+            train_dataset, 
+            batch_size=batch_size,
+            shuffle=shuffle,
+            num_workers=num_workers
+        )
+        
+        val_loader = DataLoader(
+            val_dataset, 
+            batch_size=batch_size,
+            shuffle=False,
+            num_workers=num_workers
+        )
+        
+        test_loader = DataLoader(
+            test_dataset, 
+            batch_size=batch_size,
+            shuffle=False,
+            num_workers=num_workers
+        )
+        
+        return {
+            'train_loader': train_loader,
+            'val_loader': val_loader,
+            'test_loader': test_loader,
+            'encoders_scalers': chunk_data['encoders_scalers'],
+            'categorical_indices': categorical_indices,
+            'categorical_metadata': categorical_metadata,
+            'embedding_dim': self.embedding_dim,
+            'input_dim': chunk_data.get('input_dim', X.shape[2]),
+            'output_dim': chunk_data.get('output_dim', 1),
+            'chunk_id': chunk_data.get('chunk_id', 0)
+        }
+    
     def get_data_loaders(self, data_file, batch_size=32, shuffle=True, num_workers=0, 
                          train_ratio=0.7, val_ratio=0.15, test_ratio=0.15, random_state=42):
         """Prepare data loaders for training, validation, and testing.
