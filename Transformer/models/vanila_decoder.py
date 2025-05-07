@@ -38,14 +38,13 @@ class TransformerDecoderLayer(nn.Module):
         self.layernorm3 = nn.LayerNorm(d_model)
         self.dropout = nn.Dropout(dropout)
 
-    def forward(self, x, enc_output, look_ahead_mask=None, padding_mask=None):
+    def forward(self, x, enc_output, look_ahead_mask=None):
         """ Decoder layer forward pass
 
         Args:
             x (input): input values (batch_size, seq_len, d_model)
             enc_output: output from encoder (batch_size, enc_seq_len, d_model)
             look_ahead_mask: mask for self-attention (causal attention)
-            padding_mask: mask for encoder-decoder attention
 
         Returns:
             new x: x after attention and feed forward network
@@ -71,7 +70,7 @@ class TransformerDecoderLayer(nn.Module):
         k = split_heads(self.num_heads, self.depth, self.cross_attn_wk(enc_output), batch_size)
         v = split_heads(self.num_heads, self.depth, self.cross_attn_wv(enc_output), batch_size)
 
-        cross_attn_output, _ = scaled_dot_product_attention(q, k, v, padding_mask)
+        cross_attn_output, _ = scaled_dot_product_attention(q, k, v)
         
         cross_attn_output = cross_attn_output.transpose(1, 2).contiguous()
         cross_attn_output = cross_attn_output.view(batch_size, -1, self.d_model)

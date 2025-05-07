@@ -172,13 +172,10 @@ class TransformerModel(nn.Module):
         look_ahead_mask = torch.triu(torch.ones(tgt_seq_len, tgt_seq_len), diagonal=1).bool()
         look_ahead_mask = look_ahead_mask.to(tgt.device)
         
-        # No need for padding mask in this implementation
-        padding_mask = None
-        
         # Pass through decoder layers
         dec_output = tgt
         for layer in self.decoder_layers:
-            dec_output = layer(dec_output, enc_output, look_ahead_mask, padding_mask)
+            dec_output = layer(dec_output, enc_output, look_ahead_mask)
             
         # Global average pooling across sequence dimension
         dec_output = dec_output.mean(dim=1)
@@ -188,25 +185,48 @@ class TransformerModel(nn.Module):
         
         return output
 
-    def forward(self, src, tgt=None):
+    def forward(self, src, pred_len=1):
         """
-        Forward pass of the transformer model
+        Forward pass of the transformer model with autoregressive prediction
         
         Args:
             src: Source sequence (input data) - (batch_size, seq_len, input_dim)
-            tgt: Target sequence for decoder - optional, if None, src will be used as tgt
+            pred_len: Number of time steps to predict
             
         Returns:
-            output: Predicted values - (batch_size, output_size)
+            output: Predicted values - (batch_size, pred_len)
         """
-        # If no target is provided, use source as target
-        if tgt is None:
-            tgt = src
-            
         # Pass through encoder
         enc_output = self.encode(src)
         
-        # Pass through decoder and get final output
-        output = self.decode(tgt, enc_output)
+        # Autoregressive prediction
+        batch_size = src.size(0)
+        # Initialize predictions tensor
+        predictions = torch.zeros(batch_size, pred_len, device=src.device)
         
-        return output
+        # Start with the last time step from source as initial decoder input
+        curr_input = src[:, -1:, :].clone()
+        
+        # Perform autoregressive prediction
+        for t in range(pred_len):
+            # Get prediction for current time step
+            output = self.decode(curr_input, enc_output)  # Shape: [batch_size, 1]
+            
+            # Store the prediction
+            predictions[:, t] = output.squeeze()
+            
+            # If we're not at the last time step, prepare input for next prediction
+            if t < pred_len - 1:
+                # Create a copy of the current input
+                next_input = curr_input.clone()
+                
+                # Find the index of the Flow_scaled column (last column in our features)
+                flow_idx = next_input.size(2) - 1
+                
+                # Update the flow value with our prediction for the next time step
+                next_input[:, 0, flow_idx] = output.squeeze()
+                
+                # Use this as input for the next time step
+                curr_input = next_input
+        
+        return predictions

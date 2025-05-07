@@ -102,7 +102,7 @@ class TrafficDataCollector:
         
         return df
     
-    def process_data(self, input_file, seq_len=24, pred_len=8, step_size=4):
+    def process_data(self, input_file, seq_len=24, pred_len=4, step_size=4):
         """Process data from a CSV file.
         
         Args:
@@ -447,7 +447,7 @@ if __name__ == "__main__":
     
     try:
         # Get data loaders directly from CSV file
-        data_file = os.path.join(data_collector.data_path, 'sample_long_format.csv')
+        data_file = os.path.join(data_collector.data_path, '_sample_final_time_series.csv')
         data = data_collector.get_data_loaders(data_file, batch_size=32)
         
         # Print some information about the data
