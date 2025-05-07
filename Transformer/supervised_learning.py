@@ -23,7 +23,8 @@ def train_transformer(
     scheduler,
     num_epochs,
     device,
-    save_path=None
+    save_path=None,
+    max_grad_norm=1.0  # Add max_grad_norm parameter with default value
 ):
     """Train the Transformer model.
     
@@ -37,6 +38,7 @@ def train_transformer(
         num_epochs: Number of epochs to train
         device: Device to train on
         save_path: Path to save the best model
+        max_grad_norm: Maximum norm for gradient clipping
         
     Returns:
         Dictionary with training and validation losses
@@ -72,9 +74,18 @@ def train_transformer(
             # Compute loss
             loss = criterion(outputs, y_batch)
             
+            # Check for NaN before backprop
+            if torch.isnan(loss).any():
+                print("WARNING: NaN detected in loss. Skipping batch.")
+                continue
+                
             # Backward and optimize
             optimizer.zero_grad()
             loss.backward()
+            
+            # Add gradient clipping to prevent exploding gradients
+            torch.nn.utils.clip_grad_norm_(model.parameters(), max_grad_norm)
+            
             optimizer.step()
             
             train_loss += loss.item()
@@ -460,6 +471,9 @@ def main():
                 optimizer = optim.Adam(model.parameters(), lr=args.learning_rate, weight_decay=args.weight_decay)
                 scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='min', factor=0.5, patience=5, verbose=True)
                 
+                # Define max_grad_norm for gradient clipping
+                max_grad_norm = 1.0
+                
                 # Initialize history dictionary to track training progress
                 history = {
                     'train_loss': [],
@@ -530,6 +544,10 @@ def main():
                             # Backward and optimize
                             optimizer.zero_grad()
                             loss.backward()
+                            
+                            # Add gradient clipping to prevent exploding gradients
+                            torch.nn.utils.clip_grad_norm_(model.parameters(), max_grad_norm)
+                            
                             optimizer.step()
                             
                             chunk_train_loss += loss.item()
@@ -775,6 +793,9 @@ def main():
                 optimizer = optim.Adam(model.parameters(), lr=args.learning_rate, weight_decay=args.weight_decay)
                 scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='min', factor=0.5, patience=5, verbose=True)
                 
+                # Define max_grad_norm for gradient clipping
+                max_grad_norm = 1.0
+                
                 # Train the model
                 print("Starting training...")
                 history = train_transformer(
@@ -786,7 +807,8 @@ def main():
                     scheduler=scheduler,
                     num_epochs=args.num_epochs,
                     device=device,
-                    save_path=save_path
+                    save_path=save_path,
+                    max_grad_norm=max_grad_norm  # Pass max_grad_norm parameter
                 )
                 
                 # Plot training history
