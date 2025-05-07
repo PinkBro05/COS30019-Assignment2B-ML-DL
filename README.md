@@ -69,6 +69,7 @@ The raw data is preprocessed and transformed into a format suitable for time ser
 ## Getting Started
 
 ### Data Preprocessing
+**Note:** This step expects large amount of time and computational resource due to the amount of raw data
 
 The project includes a comprehensive data preprocessing pipeline in the `Utils` folder. Follow these steps to preprocess the raw traffic data:
 
@@ -134,14 +135,80 @@ The project includes a comprehensive data preprocessing pipeline in the `Utils` 
 To train the Transformer model:
 
 ```bash
-python Transformer/supervised_learning.py
+python Transformer/supervised_learning.py --data_file Data/Transformed/final_time_series_2014_2019.csv
 ```
 
-This will:
-- Load and prepare the transformed data
-- Create and train the Transformer model
-- Save the best model checkpoint
-- Generate a plot of training history
+#### Training Parameters
+
+You can customize the training process with various command-line arguments:
+
+```bash
+python Transformer/supervised_learning.py --data_file Data/Transformed/final_time_series_2014_2019.csv --batch_size 64 --num_epochs 100 --learning_rate 0.0001
+```
+
+Key parameters:
+- `--data_file`: Path to the time series data file (required)
+- `--batch_size`: Batch size for training (default: 32)
+- `--num_epochs`: Number of training epochs (default: 50)
+- `--learning_rate`: Learning rate for optimizer (default: 0.0001)
+- `--embedding_dim`: Dimension for categorical embeddings (default: 16)
+- `--d_model`: Transformer model dimension (default: a64)
+- `--num_heads`: Number of attention heads (default: 8)
+- `--num_layers`: Number of encoder/decoder layers (default: 3)
+- `--weight_decay`: Weight decay for regularization (default: 1e-5)
+
+#### Examples
+
+Train on a sample dataset (quick test):
+```bash
+python Transformer/supervised_learning.py --data_file Data/Transformed/_sample_final_time_series.csv --num_epochs 10
+```
+
+Train with a larger model for better performance:
+```bash
+python Transformer/supervised_learning.py --data_file Data/Transformed/final_time_series_2014_2019.csv --d_model 128 --num_heads 8 --num_layers 4
+```
+
+The training script will:
+- Load and prepare the transformed time series data
+- Create and train the Transformer model with specified parameters
+- Save the best model to `Transformer/save_models/transformer_traffic_model.pth`
+- Generate training history plots in `Transformer/save_figures/transformer_training_history.png`
+
+### Testing a Trained Model
+
+You can test a trained model's performance on test data:
+
+```bash
+python Transformer/supervised_learning.py --data_file Data/Transformed/final_time_series_2020_2024.csv --test --model_path Transformer/save_models/transformer_traffic_model.pth
+```
+
+#### Testing Parameters
+
+Key parameters for testing:
+- `--test`: Flag to run in test mode instead of training
+- `--data_file`: Path to the test data file
+- `--model_path`: Path to the saved model (required for testing)
+- `--plot_test_results`: Plot visualization of test results (default: True)
+- `--test_plot_name`: Name for the test results plot (default: transformer_test_results.png)
+
+The test function will:
+- Evaluate the model on the test dataset
+- Calculate performance metrics (MSE, MAE, RMSE)
+- Generate a scatter plot comparing predicted vs. actual values
+- Save the visualization to `Transformer/save_figures/transformer_test_results.png` (or custom name)
+
+#### Examples
+
+Test with a specific model on the 2020-2024 dataset:
+```bash
+python Transformer/supervised_learning.py --data_file Data/Transformed/final_time_series_2020_2024.csv --test --model_path Transformer/save_models/transformer_traffic_model.pth
+```
+
+Test on sample data with a custom plot name:
+```bash
+python Transformer/supervised_learning.py --data_file Data/Transformed/_sample_final_time_series.csv --test --model_path Transformer/save_models/transformer_traffic_model.pth --test_plot_name my_test_results.png
+```
 
 ### Making Predictions
 
@@ -150,6 +217,39 @@ To make predictions with a trained model:
 ```bash
 python Transformer/inference.py
 ```
+
+#### Inference Parameters
+
+The inference script offers several parameters to customize prediction:
+
+```bash
+python Transformer/inference.py --input_path Data/Transformed/final_time_series_2020_2024.csv --index 1000 --output_file predictions.png
+```
+
+Key parameters:
+- `--input_path`: Path to the test CSV file (default: sample data)
+- `--index`: Row index in the CSV file to use as the prediction point (default: random)
+- `--model_path`: Path to the saved model (default: uses the standard saved model)
+- `--output_file`: Path to save the prediction plot (optional)
+
+#### Examples
+
+Predict using a specific model at a particular time point:
+```bash
+python Transformer/inference.py --input_path Data/Transformed/final_time_series_2020_2024.csv --index 5000 --model_path Transformer/save_models/transformer_traffic_model.pth
+```
+
+Run inference on different datasets:
+```bash
+python Transformer/inference.py --input_path Data/Transformed/_sample_final_time_series.csv
+```
+
+The inference script will:
+- Load the specified time series data
+- Prepare the data for the selected index point
+- Make predictions for the next 4 time steps (1 hour)
+- Display a visualization comparing predicted values with actual values (if available)
+- Save the visualization to the specified output file (if provided)
 
 ## Dependencies
 
