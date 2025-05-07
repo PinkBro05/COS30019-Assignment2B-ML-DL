@@ -10,17 +10,27 @@ import math
 class TrafficDataset(Dataset):
     """Traffic Flow Dataset for Transformer model."""
     
-    def __init__(self, X, y, categorical_indices=None):
+    def __init__(self, X, y, categorical_indices=None, device=None):
         """Initialize the dataset.
         
         Args:
             X: Input sequences (shape: [n_samples, seq_len, n_features])
             y: Target sequences (shape: [n_samples, pred_len])
             categorical_indices: Dictionary mapping categorical feature names to their indices in X
+            device: The device to put tensors on ('cuda' or 'cpu')
         """
-        self.X = torch.FloatTensor(X)
-        self.y = torch.FloatTensor(y)
+        # Convert to tensors if they're numpy arrays
+        if not isinstance(X, torch.Tensor):
+            X = torch.FloatTensor(X)
+        if not isinstance(y, torch.Tensor):
+            y = torch.FloatTensor(y)
+            
+        # Store the tensors - do NOT move to device here for compatibility with DataLoader's pin_memory
+        self.X = X
+        self.y = y
+            
         self.categorical_indices = categorical_indices
+        self.device = device
         
     def __len__(self):
         return len(self.X)
@@ -409,7 +419,6 @@ class TrafficDataCollector:
         Args:
             input_file: Path to the CSV file
         """
-        print("Pre-scanning dataset to fit encoders and scalers...")
         
         # Get unique categorical values and statistics for continuous variables
         # Read only necessary columns to save memory
@@ -433,7 +442,7 @@ class TrafficDataCollector:
         print(f"Number of day types: {len(self.day_type_encoder.classes_)}")
     
     def get_data_loaders_from_chunk(self, chunk_data, batch_size=32, shuffle=True, num_workers=0,
-                                   train_ratio=0.7, val_ratio=0.15, test_ratio=0.15, random_state=42):
+                                   train_ratio=0.7, val_ratio=0.3, random_state=42, device=None):
         """Create data loaders from a processed data chunk.
         
         Args:
@@ -441,15 +450,16 @@ class TrafficDataCollector:
             batch_size: Batch size for dataloaders
             shuffle: Whether to shuffle the data
             num_workers: Number of workers for dataloaders
-            train_ratio: Ratio of training data
-            val_ratio: Ratio of validation data
-            test_ratio: Ratio of test data
+            train_ratio: Ratio of training data (default: 0.7)
+            val_ratio: Ratio of validation data (default: 0.3)
             random_state: Random seed for reproducibility
+            device: Device to move tensors to ('cuda' or 'cpu')
             
         Returns:
             Dictionary with data loaders and metadata
         """
-        X, y = chunk_data['X'], y = chunk_data['y']
+        X = chunk_data['X']
+        y = chunk_data['y']
         categorical_indices = chunk_data['categorical_indices']
         categorical_metadata = chunk_data['categorical_metadata']
         
@@ -459,51 +469,44 @@ class TrafficDataCollector:
         # Get dataset size
         n_samples = len(X)
         
-        # Create indices for train/val/test split
+        # Create indices for train/val split
         indices = np.random.permutation(n_samples)
         train_size = int(train_ratio * n_samples)
-        val_size = int(val_ratio * n_samples)
         
         train_indices = indices[:train_size]
-        val_indices = indices[train_size:train_size + val_size]
-        test_indices = indices[train_size + val_size:]
+        val_indices = indices[train_size:]
         
-        # Extract train, validation, and test sets
+        # Extract train and validation sets
         X_train, y_train = X[train_indices], y[train_indices]
         X_val, y_val = X[val_indices], y[val_indices]
-        X_test, y_test = X[test_indices], y[test_indices]
         
-        # Create datasets
-        train_dataset = TrafficDataset(X_train, y_train, categorical_indices)
-        val_dataset = TrafficDataset(X_val, y_val, categorical_indices)
-        test_dataset = TrafficDataset(X_test, y_test, categorical_indices)
+        # Create datasets with device specification
+        train_dataset = TrafficDataset(X_train, y_train, categorical_indices, device)
+        val_dataset = TrafficDataset(X_val, y_val, categorical_indices, device)
+        
+        # Use pin_memory for efficient CPU to GPU transfers when device is not None and not CPU
+        pin_memory = device is not None and 'cuda' in str(device)
         
         # Create data loaders
         train_loader = DataLoader(
             train_dataset, 
             batch_size=batch_size,
             shuffle=shuffle,
-            num_workers=num_workers
+            num_workers=num_workers,
+            pin_memory=pin_memory
         )
         
         val_loader = DataLoader(
             val_dataset, 
             batch_size=batch_size,
             shuffle=False,
-            num_workers=num_workers
-        )
-        
-        test_loader = DataLoader(
-            test_dataset, 
-            batch_size=batch_size,
-            shuffle=False,
-            num_workers=num_workers
+            num_workers=num_workers,
+            pin_memory=pin_memory
         )
         
         return {
             'train_loader': train_loader,
             'val_loader': val_loader,
-            'test_loader': test_loader,
             'encoders_scalers': chunk_data['encoders_scalers'],
             'categorical_indices': categorical_indices,
             'categorical_metadata': categorical_metadata,
@@ -514,7 +517,7 @@ class TrafficDataCollector:
         }
     
     def get_data_loaders(self, data_file, batch_size=32, shuffle=True, num_workers=0, 
-                         train_ratio=0.7, val_ratio=0.15, test_ratio=0.15, random_state=42):
+                         train_ratio=0.7, val_ratio=0.3, random_state=42, device=None):
         """Prepare data loaders for training, validation, and testing.
         
         Args:
@@ -522,10 +525,10 @@ class TrafficDataCollector:
             batch_size: Batch size for dataloaders
             shuffle: Whether to shuffle the data
             num_workers: Number of workers for dataloaders
-            train_ratio: Ratio of training data
-            val_ratio: Ratio of validation data
-            test_ratio: Ratio of test data
+            train_ratio: Ratio of training data (default: 0.7)
+            val_ratio: Ratio of validation data (default: 0.3) 
             random_state: Random seed for reproducibility
+            device: Device to move tensors to ('cuda' or 'cpu')
             
         Returns:
             Dictionary with data loaders and metadata
@@ -542,51 +545,44 @@ class TrafficDataCollector:
         # Get dataset size
         n_samples = len(X)
         
-        # Create indices for train/val/test split
+        # Create indices for train/val split
         indices = np.random.permutation(n_samples)
         train_size = int(train_ratio * n_samples)
-        val_size = int(val_ratio * n_samples)
         
         train_indices = indices[:train_size]
-        val_indices = indices[train_size:train_size + val_size]
-        test_indices = indices[train_size + val_size:]
+        val_indices = indices[train_size:]
         
-        # Extract train, validation, and test sets
+        # Extract train and validation sets
         X_train, y_train = X[train_indices], y[train_indices]
         X_val, y_val = X[val_indices], y[val_indices]
-        X_test, y_test = X[test_indices], y[test_indices]
         
-        # Create datasets
-        train_dataset = TrafficDataset(X_train, y_train, categorical_indices)
-        val_dataset = TrafficDataset(X_val, y_val, categorical_indices)
-        test_dataset = TrafficDataset(X_test, y_test, categorical_indices)
+        # Create datasets with device specification
+        train_dataset = TrafficDataset(X_train, y_train, categorical_indices, device)
+        val_dataset = TrafficDataset(X_val, y_val, categorical_indices, device)
+        
+        # Use pin_memory for efficient CPU to GPU transfers when device is not None and not CPU
+        pin_memory = device is not None and 'cuda' in str(device)
         
         # Create data loaders
         train_loader = DataLoader(
             train_dataset, 
             batch_size=batch_size,
             shuffle=shuffle,
-            num_workers=num_workers
+            num_workers=num_workers,
+            pin_memory=pin_memory
         )
         
         val_loader = DataLoader(
             val_dataset, 
             batch_size=batch_size,
             shuffle=False,
-            num_workers=num_workers
-        )
-        
-        test_loader = DataLoader(
-            test_dataset, 
-            batch_size=batch_size,
-            shuffle=False,
-            num_workers=num_workers
+            num_workers=num_workers,
+            pin_memory=pin_memory
         )
         
         return {
             'train_loader': train_loader,
             'val_loader': val_loader,
-            'test_loader': test_loader,
             'encoders_scalers': data['encoders_scalers'],
             'categorical_indices': categorical_indices,
             'categorical_metadata': categorical_metadata,

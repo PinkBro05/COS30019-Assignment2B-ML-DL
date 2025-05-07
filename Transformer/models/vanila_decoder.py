@@ -1,88 +1,76 @@
 """
-Decoder for the Transformer model.
+Decoder part of the transformer model.
+Contains self-attention, encoder-decoder attention, and feed forward modules.
 """
 import torch
 import torch.nn as nn
-
-from Transformer.models.math import split_heads, scaled_dot_product_attention
+import torch.nn.functional as F
+from Transformer.models.math import MultiHeadAttention, PositionWiseFeedForward
 
 class TransformerDecoderLayer(nn.Module):
-    def __init__(self, d_model, num_heads, d_ff, dropout=0.1):
+    def __init__(self, d_model, nhead, dim_feedforward=2048, dropout=0.1):
         super(TransformerDecoderLayer, self).__init__()
-        self.num_heads = num_heads # Number of attention heads
-        self.d_model = d_model # Input dimension for the model
-        self.depth = d_model // num_heads # Depth of each attention head
-
-        # Self Attention
-        self.self_attn_wq = nn.Linear(d_model, d_model)
-        self.self_attn_wk = nn.Linear(d_model, d_model)
-        self.self_attn_wv = nn.Linear(d_model, d_model)
-        self.self_attn_dense = nn.Linear(d_model, d_model)
         
-        # Cross Attention (encoder-decoder attention)
-        self.cross_attn_wq = nn.Linear(d_model, d_model)
-        self.cross_attn_wk = nn.Linear(d_model, d_model)
-        self.cross_attn_wv = nn.Linear(d_model, d_model)
-        self.cross_attn_dense = nn.Linear(d_model, d_model)
-
-        # Feed-forward network
-        self.feed_forward = nn.Sequential(
-            nn.Linear(d_model, d_ff),
-            nn.ReLU(),
-            nn.Linear(d_ff, d_model)
-        )
-
-        # Layer normalization and dropout
-        self.layernorm1 = nn.LayerNorm(d_model)
-        self.layernorm2 = nn.LayerNorm(d_model)
-        self.layernorm3 = nn.LayerNorm(d_model)
+        # Define multi-head attention modules
+        self.self_attn = MultiHeadAttention(d_model, nhead, dropout=dropout)
+        self.encoder_attn = MultiHeadAttention(d_model, nhead, dropout=dropout)
+        
+        # Define feed-forward network (mini version of the Transformer)
+        self.feed_forward = PositionWiseFeedForward(d_model, dim_feedforward, dropout=dropout)
+        
+        # Define normalization layers
+        self.norm1 = nn.LayerNorm(d_model)
+        self.norm2 = nn.LayerNorm(d_model)
+        self.norm3 = nn.LayerNorm(d_model)
+        
+        # Define dropout
         self.dropout = nn.Dropout(dropout)
-
-    def forward(self, x, enc_output, look_ahead_mask=None):
-        """ Decoder layer forward pass
-
-        Args:
-            x (input): input values (batch_size, seq_len, d_model)
-            enc_output: output from encoder (batch_size, enc_seq_len, d_model)
-            look_ahead_mask: mask for self-attention (causal attention)
-
-        Returns:
-            new x: x after attention and feed forward network
+        
+    def forward(self, x, memory, look_ahead_mask=None, memory_mask=None):
         """
-        batch_size = x.size(0)
+        Forward pass for the decoder layer.
         
-        # Self attention
-        q = split_heads(self.num_heads, self.depth, self.self_attn_wq(x), batch_size)
-        k = split_heads(self.num_heads, self.depth, self.self_attn_wk(x), batch_size)
-        v = split_heads(self.num_heads, self.depth, self.self_attn_wv(x), batch_size)
-
-        self_attn_output, _ = scaled_dot_product_attention(q, k, v, look_ahead_mask)
+        Args:
+            x: Input tensor (batch_size, seq_len, d_model)
+            memory: Output from the encoder (batch_size, src_seq_len, d_model)
+            look_ahead_mask: Mask for self-attention (optional)
+            memory_mask: Mask for encoder-decoder attention (optional)
+            
+        Returns:
+            Tensor after attention and feed-forward (batch_size, seq_len, d_model)
+        """
+        device = x.device
         
-        self_attn_output = self_attn_output.transpose(1, 2).contiguous()
-        self_attn_output = self_attn_output.view(batch_size, -1, self.d_model)
-        self_attn_output = self.self_attn_dense(self_attn_output)
+        # Self attention (Pre-LayerNorm variant)
+        residual = x
+        x = self.norm1(x)
         
-        # Add & Norm (first sublayer)
-        attn1 = self.layernorm1(x + self.dropout(self_attn_output))
-
-        # Cross attention (encoder-decoder attention)
-        q = split_heads(self.num_heads, self.depth, self.cross_attn_wq(attn1), batch_size)
-        k = split_heads(self.num_heads, self.depth, self.cross_attn_wk(enc_output), batch_size)
-        v = split_heads(self.num_heads, self.depth, self.cross_attn_wv(enc_output), batch_size)
-
-        cross_attn_output, _ = scaled_dot_product_attention(q, k, v)
+        # Ensure masks are on the same device
+        if look_ahead_mask is not None:
+            look_ahead_mask = look_ahead_mask.to(device)
+            
+        x = self.self_attn(x, x, x, look_ahead_mask)
+        x = self.dropout(x)
+        x = residual + x
         
-        cross_attn_output = cross_attn_output.transpose(1, 2).contiguous()
-        cross_attn_output = cross_attn_output.view(batch_size, -1, self.d_model)
-        cross_attn_output = self.cross_attn_dense(cross_attn_output)
+        # Encoder-decoder attention (Pre-LayerNorm variant)
+        residual = x
+        x = self.norm2(x)
         
-        # Add & Norm (second sublayer)
-        attn2 = self.layernorm2(attn1 + self.dropout(cross_attn_output))
+        # Ensure memory and masks are on the same device
+        memory = memory.to(device)
+        if memory_mask is not None:
+            memory_mask = memory_mask.to(device)
+            
+        x = self.encoder_attn(x, memory, memory, memory_mask)
+        x = self.dropout(x)
+        x = residual + x
         
-        # Feed Forward Network
-        ffn_output = self.feed_forward(attn2)
+        # Feed forward (Pre-LayerNorm variant)
+        residual = x
+        x = self.norm3(x)
+        x = self.feed_forward(x)
+        x = self.dropout(x)
+        x = residual + x
         
-        # Add & Norm (third sublayer)
-        out = self.layernorm3(attn2 + self.dropout(ffn_output))
-        
-        return out
+        return x

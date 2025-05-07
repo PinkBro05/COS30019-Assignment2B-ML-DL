@@ -60,6 +60,7 @@ def train_transformer(
         train_loss = 0
         
         for X_batch, y_batch in train_loader:
+            # Move data to device here since we're not doing it in the dataset
             X_batch, y_batch = X_batch.to(device), y_batch.to(device)
             
             # Get prediction length from target
@@ -88,6 +89,7 @@ def train_transformer(
         
         with torch.no_grad():
             for X_batch, y_batch in val_loader:
+                # Move data to device here since we're not doing it in the dataset
                 X_batch, y_batch = X_batch.to(device), y_batch.to(device)
                 
                 # Get prediction length from target
@@ -261,8 +263,8 @@ def load_data(args):
         num_workers=args.num_workers,
         train_ratio=args.train_ratio,
         val_ratio=args.val_ratio,
-        test_ratio=args.test_ratio,
-        random_state=args.random_seed
+        random_state=args.random_seed,
+        device=args.device  # Pass device to data loaders
     )
     
     return data_loaders
@@ -284,10 +286,8 @@ def parse_args():
                         help='Number of workers for data loading')
     parser.add_argument('--train_ratio', type=float, default=0.7,
                         help='Ratio of training data')
-    parser.add_argument('--val_ratio', type=float, default=0.15,
+    parser.add_argument('--val_ratio', type=float, default=0.3,
                         help='Ratio of validation data')
-    parser.add_argument('--test_ratio', type=float, default=0.15,
-                        help='Ratio of test data')
     parser.add_argument('--use_chunking', action='store_true',
                         help='Process data in chunks to handle large datasets')
     parser.add_argument('--chunk_size', type=int, default=100000,
@@ -452,6 +452,9 @@ def main():
                     categorical_indices=categorical_indices
                 )
                 
+                # Move model to device immediately after creation
+                model = model.to(device)
+                
                 # Define loss function, optimizer, and scheduler
                 criterion = nn.MSELoss()
                 optimizer = optim.Adam(model.parameters(), lr=args.learning_rate, weight_decay=args.weight_decay)
@@ -494,8 +497,8 @@ def main():
                             num_workers=args.num_workers,
                             train_ratio=args.train_ratio,
                             val_ratio=args.val_ratio,
-                            test_ratio=args.test_ratio,
-                            random_state=args.random_seed
+                            random_state=args.random_seed,
+                            device=device  # Pass device to data loaders
                         )
                         
                         train_loader = data_loaders['train_loader']
@@ -623,7 +626,7 @@ def main():
                     plot_path = os.path.join(figures_dir, args.plot_name)
                     plt.savefig(plot_path)
                     print(f"Training plot saved to {plot_path}")
-                    plt.show()
+                    plt.close() # Close the figure to free up memory
                 
                 # Testing mode (if requested)
                 if args.test:
@@ -647,14 +650,13 @@ def main():
                         shuffle=False,
                         num_workers=args.num_workers,
                         train_ratio=0,
-                        val_ratio=0,
-                        test_ratio=1,
-                        random_state=args.random_seed
+                        val_ratio=1,
+                        random_state=args.random_seed,
+                        device=device  # Pass device to data loaders
                     )
                     
                     # Get test loader and encoders/scalers
-                    test_loader = test_loaders['test_loader']
-                    encoders_scalers = test_loaders['encoders_scalers']
+                    test_loader = test_loaders['val_loader']  # Use validation loader for testing
                     
                     # Test the model
                     print("Testing the model...")
@@ -691,13 +693,12 @@ def main():
                 num_workers=args.num_workers,
                 train_ratio=args.train_ratio,
                 val_ratio=args.val_ratio,
-                test_ratio=args.test_ratio,
-                random_state=args.random_seed
+                random_state=args.random_seed,
+                device=device  # Pass device to data loaders
             )
             
             train_loader = data_loaders['train_loader']
             val_loader = data_loaders['val_loader']
-            test_loader = data_loaders['test_loader']
             categorical_indices = data_loaders['categorical_indices']
             categorical_metadata = data_loaders['categorical_metadata']
             encoders_scalers = data_loaders['encoders_scalers']
@@ -728,6 +729,9 @@ def main():
                 categorical_metadata=categorical_metadata,
                 categorical_indices=categorical_indices
             )
+            
+            # Move model to device immediately after creation
+            model = model.to(device)
             
             # Define loss function
             criterion = nn.MSELoss()
@@ -813,7 +817,7 @@ def main():
                     plot_path = os.path.join(figures_dir, args.plot_name)
                     plt.savefig(plot_path)
                     print(f"Training plot saved to {plot_path}")
-                    plt.show()
+                    plt.close() # Close the figure to free up memory
                 
                 print(f"Training completed. Best model saved to {save_path}")
         

@@ -217,7 +217,7 @@ def prepare_data_for_inference(data_collector, df, index, args, seq_len=24):
     }
 
 
-def predict_next_steps(model, X, num_steps=4, future_features=None, encoders_scalers=None):
+def predict_next_steps(model, X, num_steps=4, future_features=None, encoders_scalers=None, device=None):
     """Make autoregressive predictions for multiple steps.
     
     Args:
@@ -226,17 +226,30 @@ def predict_next_steps(model, X, num_steps=4, future_features=None, encoders_sca
         num_steps: Number of steps to predict
         future_features: Features for future time steps (excluding Flow)
         encoders_scalers: Dictionary with encoders and scalers
+        device: Device to perform predictions on
         
     Returns:
         Predicted values for num_steps time steps
     """
     with torch.no_grad():
-        # Convert to tensor
-        X_tensor = torch.FloatTensor(X)
+        # Convert to tensor if it's not already
+        if not isinstance(X, torch.Tensor):
+            X_tensor = torch.FloatTensor(X)
+        else:
+            X_tensor = X
+            
+        # Move to device if specified
+        if device is not None:
+            X_tensor = X_tensor.to(device)
+            model = model.to(device)
         
         # Use the model's autoregressive prediction function directly
         predictions = model(X_tensor, pred_len=num_steps)
         
+        # Move predictions back to CPU for numpy conversion if needed
+        if device is not None:
+            predictions = predictions.cpu()
+            
         # Convert predictions to numpy
         predictions = predictions.detach().numpy()
     
@@ -387,7 +400,8 @@ def main():
             inference_data['X'], 
             num_steps=args.num_steps,
             future_features=inference_data.get('future_features'),
-            encoders_scalers=inference_data['encoders_scalers']
+            encoders_scalers=inference_data['encoders_scalers'],
+            device=device
         )
         
         # Print the predictions

@@ -93,6 +93,7 @@ class TransformerModel(nn.Module):
             return x
         
         batch_size, seq_len, _ = x.shape
+        device = x.device  # Get the device of the input tensor
         
         # Create a list to store processed features
         features_list = []
@@ -108,8 +109,8 @@ class TransformerModel(nn.Module):
                         break
                 
                 if feature_name:
-                    # Extract categorical indices
-                    cat_indices = x[:, :, i].long()
+                    # Extract categorical indices and ensure they're on the correct device
+                    cat_indices = x[:, :, i].long().to(device)
                     
                     # Apply embedding
                     embedding = self.embedding_layers[feature_name](cat_indices)
@@ -125,11 +126,11 @@ class TransformerModel(nn.Module):
         
         return embedded_x
 
-    def create_masks(self, src_seq_len, tgt_seq_len):
-        # Create causal mask for decoder self-attention
-        look_ahead_mask = torch.triu(torch.ones(tgt_seq_len, tgt_seq_len), diagonal=1).bool()
-        # Create mask for encoder
-        src_mask = torch.triu(torch.ones(src_seq_len, src_seq_len), diagonal=1).bool()
+    def create_masks(self, src_seq_len, tgt_seq_len, device):
+        # Create causal mask for decoder self-attention (directly on the device)
+        look_ahead_mask = torch.triu(torch.ones(tgt_seq_len, tgt_seq_len, device=device), diagonal=1).bool()
+        # Create mask for encoder (directly on the device)
+        src_mask = torch.triu(torch.ones(src_seq_len, src_seq_len, device=device), diagonal=1).bool()
         
         return src_mask, look_ahead_mask
 
@@ -144,10 +145,10 @@ class TransformerModel(nn.Module):
         
         # Get sequence length for masks
         src_seq_len = src.size(1)
+        device = src.device
         
-        # Create causal mask for encoder (for time-series data)
-        src_mask = torch.triu(torch.ones(src_seq_len, src_seq_len), diagonal=1).bool()
-        src_mask = src_mask.to(src.device)
+        # Create causal mask for encoder (for time-series data) directly on the device
+        src_mask = torch.triu(torch.ones(src_seq_len, src_seq_len, device=device), diagonal=1).bool()
         
         # Pass through encoder layers
         enc_output = src
@@ -167,10 +168,10 @@ class TransformerModel(nn.Module):
         
         # Get sequence lengths for masks
         tgt_seq_len = tgt.size(1)
+        device = tgt.device
         
-        # Create causal mask for decoder self-attention
-        look_ahead_mask = torch.triu(torch.ones(tgt_seq_len, tgt_seq_len), diagonal=1).bool()
-        look_ahead_mask = look_ahead_mask.to(tgt.device)
+        # Create causal mask for decoder self-attention directly on the device
+        look_ahead_mask = torch.triu(torch.ones(tgt_seq_len, tgt_seq_len, device=device), diagonal=1).bool()
         
         # Pass through decoder layers
         dec_output = tgt
@@ -201,13 +202,15 @@ class TransformerModel(nn.Module):
         
         # Autoregressive prediction
         batch_size = src.size(0)
-        # Initialize predictions tensor
-        predictions = torch.zeros(batch_size, pred_len, device=src.device)
+        device = src.device
+        
+        # Initialize predictions tensor directly on the device
+        predictions = torch.zeros(batch_size, pred_len, device=device)
         
         # Start with the last time step from source as initial decoder input
         curr_input = src[:, -1:, :].clone()
         
-        # Perform autoregressive prediction
+        # Create all predictions at once for better GPU utilization
         for t in range(pred_len):
             # Get prediction for current time step
             output = self.decode(curr_input, enc_output)  # Shape: [batch_size, 1]
