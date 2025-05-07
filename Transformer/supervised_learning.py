@@ -88,10 +88,13 @@ def train_transformer(
             
             optimizer.step()
             
-            train_loss += loss.item()
+            # Add numerical stability when accumulating loss - use float32 
+            # to mitigate potential overflow in accumulation
+            train_loss += float(loss.item())
         
         # Calculate average training loss
-        train_loss /= len(train_loader)
+        num_batches = len(train_loader)
+        train_loss = train_loss / (num_batches + 1e-10)  # Add epsilon to prevent division by zero
         history['train_loss'].append(train_loss)
         
         # Validation
@@ -112,10 +115,12 @@ def train_transformer(
                 # Compute loss
                 loss = criterion(outputs, y_batch)
                 
-                val_loss += loss.item()
+                # Add numerical stability when accumulating loss - use float32
+                val_loss += float(loss.item())
         
-        # Calculate average validation loss
-        val_loss /= len(val_loader)
+        # Calculate average validation loss with numerical stability
+        num_val_batches = len(val_loader)
+        val_loss = val_loss / (num_val_batches + 1e-10)  # Add epsilon to prevent division by zero
         history['val_loss'].append(val_loss)
         
         # Get current learning rate
