@@ -129,7 +129,7 @@ The project includes a comprehensive data preprocessing pipeline in the `Utils` 
       - School counts near each SCATS site
       - Traffic light and SCATS site types
       - Public holiday information
-      
+
    III. **Time Series Reshaping**: Formats data for sequence prediction tasks
 
 ### Training a Model
@@ -225,12 +225,13 @@ python Transformer/inference.py
 The inference script offers several parameters to customize prediction:
 
 ```bash
-python Transformer/inference.py --input_path Data/Transformed/final_time_series_2020_2024.csv --index 1000 --output_file predictions.png
+python Transformer/inference.py --input_path Data/Transformed/final_time_series_2020_2024.csv --index 1000 --output_step 4 --output_file predictions.png
 ```
 
 Key parameters:
 - `--input_path`: Path to the test CSV file (default: sample data)
 - `--index`: Row index in the CSV file to use as the prediction point (default: random)
+- `--output_step`: Number of step to predict (default: 4)
 - `--model_path`: Path to the saved model (default: uses the standard saved model)
 - `--output_file`: Path to save the prediction plot (optional)
 
@@ -265,4 +266,5 @@ The inference script will:
 1. **Hong Anh Nguyen** - Data, Transformer
 2. **Phong Tran** - LSTM
 3. **James Luong**- GRU
+
 COS30019 - Introduction to Artificial Intelligence - Assignment 2B

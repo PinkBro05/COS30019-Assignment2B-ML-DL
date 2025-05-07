@@ -30,6 +30,8 @@ def parse_args():
                         help='Path to the test CSV file')
     parser.add_argument('--index', type=int, default= random.randint(0, 10000),
                         help='Row index in the CSV file to use as the prediction point')
+    parser.add_argument('--num_steps', type=int, default=4,
+                        help='Number of future time steps to predict (default: 4)')
     parser.add_argument('--model_path', type=str, default="Transformer/save_models/transformer_traffic_model.pth",
                         help='Path to the saved model (default: uses the model in save_models directory)')
     parser.add_argument('--embedding_dim', type=int, default=16,
@@ -81,13 +83,14 @@ def load_model(model_path, model_params, categorical_metadata, categorical_indic
     return model
 
 
-def prepare_data_for_inference(data_collector, df, index, seq_len=24):
+def prepare_data_for_inference(data_collector, df, index, args, seq_len=24):
     """Prepare data for inference.
     
     Args:
         data_collector: TrafficDataCollector object
         df: DataFrame with the test data
         index: Index of the row to predict from
+        args: Command line arguments
         seq_len: Number of time steps to use for prediction
         
     Returns:
@@ -154,12 +157,12 @@ def prepare_data_for_inference(data_collector, df, index, seq_len=24):
     # Prepare arrays for the next time steps as well (for autoregressive prediction)
     # If we don't have enough rows, create empty arrays with the same structure
     future_features = None
-    if index + 4 < len(df):
+    if index + args.num_steps < len(df):
         # We have enough future data in the DataFrame
-        future_features = df_processed.loc[index+1:index+4, feature_cols].values
+        future_features = df_processed.loc[index+1:index+args.num_steps, feature_cols].values
     else:
         # Create empty array with the same structure for future predictions
-        future_shape = (min(4, len(df) - index - 1), len(feature_cols))
+        future_shape = (min(args.num_steps, len(df) - index - 1), len(feature_cols))
         future_features = np.zeros(future_shape)
         
     # Original times for visualization
@@ -169,15 +172,15 @@ def prepare_data_for_inference(data_collector, df, index, seq_len=24):
     # Get times for future steps as well (for visualization)
     future_times = None
     future_dates = None
-    if index + 4 < len(df):
-        future_times = df.loc[index+1:index+4, 'time'].values
-        future_dates = df.loc[index+1:index+4, 'date'].values
+    if index + args.num_steps < len(df):
+        future_times = df.loc[index+1:index+args.num_steps, 'time'].values
+        future_dates = df.loc[index+1:index+args.num_steps, 'date'].values
         times = np.concatenate([times, future_times])
         dates = np.concatenate([dates, future_dates])
     else:
         # If we don't have enough future data, estimate the times
         last_time = pd.to_datetime(f"{dates[-1]} {times[-1]}")
-        for i in range(1, 5):
+        for i in range(1, args.num_steps + 1):
             # Assuming 15-minute intervals
             next_time = last_time + timedelta(minutes=15*i)
             new_date = next_time.strftime('%Y-%m-%d')
@@ -188,10 +191,10 @@ def prepare_data_for_inference(data_collector, df, index, seq_len=24):
     # Convert to datetime objects
     datetimes = [pd.to_datetime(f"{date} {time}") for date, time in zip(dates, times)]
     
-    # Get actual values for the next 4 time steps (for comparison)
+    # Get actual values for the next steps (for comparison)
     actuals = None
-    if index + 4 < len(df):
-        actuals = df.loc[index+1:index+4, 'Flow'].values
+    if index + args.num_steps < len(df):
+        actuals = df.loc[index+1:index+args.num_steps, 'Flow'].values
     
     # Prepare input data for the model
     X = np.expand_dims(features, axis=0)  # Add batch dimension
@@ -267,24 +270,26 @@ def visualize_prediction(input_data, predictions, flow_scaler, times, site_id, a
     plt.figure(figsize=(14, 7))
     
     # Get x values for the time axis
-    x_values = range(len(times))
+    x_values = range(len(input_flows) + len(predicted_flows))
     
-    # Define the prediction start point (index 23, which is the last input point)
-    pred_start_idx = 23
+    # Define the prediction start point (last input point)
+    pred_start_idx = len(input_flows) - 1
     
     # Plot the input flows
     plt.plot(x_values[:pred_start_idx+1], input_flows, 'b-', label='Input (Historical)')
     
     # Plot the predictions starting from the last input point
-    plt.plot(x_values[pred_start_idx:pred_start_idx+5], 
+    plt.plot(x_values[pred_start_idx:pred_start_idx+len(predicted_flows)+1], 
              np.concatenate([[input_flows[-1]], predicted_flows]), 
              'r-', label='Prediction')
     
     # If we have actuals, plot them correctly starting from the last input point
     if actuals is not None:
         # Include the last input point to show continuity with actual values
-        plt.plot(x_values[pred_start_idx:pred_start_idx+5], 
-                 np.concatenate([[input_flows[-1]], actuals[:4]]), 
+        # Make sure we don't try to plot more actual values than we have
+        actual_len = min(len(actuals), len(predicted_flows))
+        plt.plot(x_values[pred_start_idx:pred_start_idx+actual_len+1], 
+                 np.concatenate([[input_flows[-1]], actuals[:actual_len]]), 
                  'g-', label='Actual')
     
     # Format the x-axis with the dates including both date and time
@@ -340,7 +345,7 @@ def main():
         
         # Prepare data for inference
         print(f"Preparing data for inference at index {args.index}...")
-        inference_data = prepare_data_for_inference(data_collector, df, args.index)
+        inference_data = prepare_data_for_inference(data_collector, df, args.index, args)
         
         # Set model path
         if args.model_path is None:
@@ -375,12 +380,12 @@ def main():
             inference_data['categorical_indices']
         )
         
-        # Make prediction for the next 4 steps
-        print("Making prediction for the next 4 time steps...")
+        # Make prediction for the next steps
+        print(f"Making prediction for the next {args.num_steps} time steps...")
         predictions = predict_next_steps(
             model, 
             inference_data['X'], 
-            num_steps=4,
+            num_steps=args.num_steps,
             future_features=inference_data.get('future_features'),
             encoders_scalers=inference_data['encoders_scalers']
         )
@@ -390,7 +395,7 @@ def main():
         predictions_reshaped = predictions.reshape(-1, 1)
         predictions_original = flow_scaler.inverse_transform(predictions_reshaped).flatten()
         
-        print("\nPredictions for the next 4 time steps:")
+        print(f"\nPredictions for the next {args.num_steps} time steps:")
         for i, pred in enumerate(predictions_original):
             print(f"  Step {i+1}: {pred:.2f} vehicles")
         
