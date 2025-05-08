@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """
 Inference script for the Transformer model for traffic flow prediction.
 This script allows users to input a path to a test file, a row index, and get predictions 
