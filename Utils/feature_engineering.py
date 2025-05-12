@@ -3,6 +3,7 @@ import pandas as pd
 import numpy as np
 import re
 from glob import glob
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from path_utilities import PathManager
 from traffic_data_transformation import load_csv_with_fallback_encoding
@@ -75,27 +76,30 @@ def prepare_school_data(base_dir):
     # Initialize result dataframe
     result_df = pd.DataFrame(columns=['scat_number', 'school_count', 'long', 'lat'])
     
-    # Iterate through each traffic light
-    print("Calculating distances and counting schools within 500 meters...")
+    # Parallelize distance calculations and school counting
+    print("Calculating distances and counting schools within 500 meters in parallel...")
+    records = traffic_df.to_dict('records')
     result_data = []
-    for _, traffic_row in traffic_df.iterrows():
-        if pd.isna(traffic_row['long']) or pd.isna(traffic_row['lat']):
-            continue
-            
-        site_no = traffic_row['SITE_NO']
-        long = traffic_row['long']
-        lat = traffic_row['lat']
-        
-        # Count schools within 500 meters
-        school_count = count_nearby_schools(traffic_row, school_df, 500)
-        
-        # Add to result data
-        result_data.append({
-            'scat_number': site_no,
-            'school_count': school_count,
-            'long': long,
-            'lat': lat
-        })
+    max_workers = min(len(records), os.cpu_count() or 1)
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        future_to_record = {}
+        for rec in records:
+            if pd.isna(rec['long']) or pd.isna(rec['lat']):
+                continue
+            future = executor.submit(count_nearby_schools, rec, school_df, 500)
+            future_to_record[future] = rec
+        for future in as_completed(future_to_record):
+            rec = future_to_record[future]
+            try:
+                count = future.result()
+                result_data.append({
+                    'scat_number': rec['SITE_NO'],
+                    'school_count': count,
+                    'long': rec['long'],
+                    'lat': rec['lat']
+                })
+            except Exception as e:
+                print(f"Error counting schools for site {rec.get('SITE_NO')}: {e}")
     
     # Convert to DataFrame
     result_df = pd.DataFrame(result_data)
@@ -432,12 +436,20 @@ def feature_engineering(base_dir, transformed_files=None):
     
     print(f"Found {len(files)} files to process.")
     
-    # Process each file
+    # Process each transformed file in parallel
+    print(f"Processing {len(files)} feature engineering tasks in parallel...")
     success_files = []
-    for file in files:
-        success, output_path = process_file(file, scat_type_df, traffic_lights_df, holidays_df, school_dic_df, output_dir)
-        if success:
-            success_files.append(output_path)
-    
+    max_workers = min(len(files), os.cpu_count() or 1)
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        future_to_file = {executor.submit(process_file, file, scat_type_df, traffic_lights_df, holidays_df, school_dic_df, output_dir): file for file in files}
+        for future in as_completed(future_to_file):
+            file = future_to_file[future]
+            try:
+                success, out_path = future.result()
+                if success:
+                    success_files.append(out_path)
+            except Exception as e:
+                print(f"Error processing file {file}: {e}")
+
     print(f"Feature engineering complete. Successfully processed {len(success_files)} out of {len(files)} files.")
     return success_files

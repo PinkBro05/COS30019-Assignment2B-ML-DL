@@ -3,6 +3,7 @@ import pandas as pd
 import numpy as np
 from glob import glob
 from datetime import datetime
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from path_utilities import PathManager
 
@@ -28,16 +29,8 @@ class TrafficDataTransformer:
         return [d for d in os.listdir(self.data_path) 
                 if os.path.isdir(os.path.join(self.data_path, d)) and d.isdigit()]
     
-    def read_data_files(self, year, limit=5):
-        """Read all VSDATA files for a specific year.
-        
-        Args:
-            year: Year to process (str)
-            limit: Limit number of files to read (None for all files)
-            
-        Returns:
-            DataFrame containing combined data from all files
-        """
+    def read_data_files(self, year, limit=15):
+        """Read all VSDATA files for a specific year, now with parallel reads."""
         year_dir = os.path.join(self.data_path, str(year))
         csv_files = glob(os.path.join(year_dir, 'VSDATA_*.csv'))
         
@@ -45,19 +38,25 @@ class TrafficDataTransformer:
             print(f"No data files found for year {year}")
             return None
         
-        # Read and combine all CSV files for the year
+        # Read and combine all CSV files for the year in parallel
+        files_to_read = sorted(csv_files)[:limit] if limit else sorted(csv_files)
         dfs = []
-        for file in sorted(csv_files)[:limit] if limit else sorted(csv_files):
-            try:
-                df = pd.read_csv(file)
-                dfs.append(df)
-                print(f"Processed {os.path.basename(file)}")
-            except Exception as e:
-                print(f"Error reading {file}: {e}")
+        # Use up to CPU count threads
+        max_workers = min(len(files_to_read), os.cpu_count() or 1)
+        with ThreadPoolExecutor(max_workers=max_workers) as executor:
+            future_to_file = {executor.submit(pd.read_csv, file): file for file in files_to_read}
+            for future in as_completed(future_to_file):
+                file = future_to_file[future]
+                try:
+                    df = future.result()
+                    dfs.append(df)
+                    print(f"Processed {os.path.basename(file)}")
+                except Exception as e:
+                    print(f"Error reading {file}: {e}")
         
         if not dfs:
             return None
-            
+        
         return pd.concat(dfs, ignore_index=True)
     
     def transform_data(self, df, year=None):
@@ -262,29 +261,38 @@ class TrafficDataTransformer:
         print("Failed to create sample data")
         return None
     
+    # Add helper method to process each year in parallel
+    def _process_year(self, year):
+        """Process a single year's data for multithreading."""
+        print(f"Processing data for year {year}...")
+        raw_data = self.read_data_files(year, limit=None)
+        transformed_data = self.transform_data(raw_data, year=year)
+        if transformed_data is not None:
+            output_file = os.path.join(self.output_path, f'{year}_transformed_scats_data.csv')
+            transformed_data.to_csv(output_file, index=False)
+            print(f"Saved transformed data for year {year} to {output_file}")
+            transformed_data['year'] = year
+            print(f"Successfully transformed data for year {year} with {len(transformed_data)} records")
+            return year
+        return None
+
+    # Replace existing process_all_years with parallel version
     def process_all_years(self):
-        """Process data for all specified years and save each year to a separate CSV file."""
+        """Process data for all specified years in parallel and save each year to a separate CSV file."""
         processed_years = []
-        
-        for year in self.years:
-            print(f"Processing data for year {year}...")
-            raw_data = self.read_data_files(year, limit=None)
-            transformed_data = self.transform_data(raw_data, year=year)
-            
-            if transformed_data is not None:
-                # Save each year's data to a separate CSV file
-                output_file = os.path.join(self.output_path, f'{year}_transformed_scats_data.csv')
-                transformed_data.to_csv(output_file, index=False)
-                print(f"Saved transformed data for year {year} to {output_file}")
-                
-                # Include year information in the DataFrame
-                transformed_data['year'] = year
-                processed_years.append(year)
-                
-                print(f"Successfully transformed data for year {year} with {len(transformed_data)} records")
-        
+        # Use ThreadPoolExecutor for parallel processing
+        with ThreadPoolExecutor(max_workers=os.cpu_count()) as executor:
+            future_to_year = {executor.submit(self._process_year, year): year for year in self.years}
+            for future in as_completed(future_to_year):
+                year = future_to_year[future]
+                try:
+                    result = future.result()
+                    if result:
+                        processed_years.append(result)
+                except Exception as e:
+                    print(f"Error processing year {year}: {e}")
         if processed_years:
-            print(f"Successfully processed data for years: {', '.join(processed_years)}")
+            print(f"Successfully processed data for years: {', '.join(map(str, processed_years))}")
             return processed_years
         else:
             print("No data was processed successfully")

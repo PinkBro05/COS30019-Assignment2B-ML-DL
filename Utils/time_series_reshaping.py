@@ -1,10 +1,18 @@
 import os
 import pandas as pd
 from glob import glob
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 def create_time_column(time_idx):
-    """Convert V00_0, V01_0, ... to actual time strings"""
-    idx = int(time_idx.replace('V', '').replace('_0', ''))
+    """Convert V00_0, V01_0, V00_0.0, V01_0.0, ... to actual time strings"""
+    # Handle both _0 and _0.0 endings
+    cleaned_idx = time_idx.replace('V', '')
+    if '_0.0' in cleaned_idx:
+        cleaned_idx = cleaned_idx.replace('_0.0', '')
+    else:
+        cleaned_idx = cleaned_idx.replace('_0', '')
+    
+    idx = int(cleaned_idx)
     hours = idx // 4
     minutes = (idx % 4) * 15
     return f"{hours:02d}:{minutes:02d}"
@@ -151,9 +159,20 @@ def process_data_in_date_ranges(input_file, output_prefix, date_ranges):
     date_ranges (list): List of tuples with (start_date, end_date, output_suffix)
     """
     results = []
-    for start_date, end_date, suffix in date_ranges:
-        print(f"\nProcessing data from {start_date} to {end_date}...")
-        output_file = f"{output_prefix}_{suffix}.csv"
-        output_path = reshape_traffic_data(input_file, output_file, start_date, end_date)
-        results.append(output_path)
+    # Parallelize date range processing
+    with ThreadPoolExecutor(max_workers=min(len(date_ranges), os.cpu_count() or 1)) as executor:
+        future_to_range = {}
+        for start_date, end_date, suffix in date_ranges:
+            print(f"\nScheduling processing for {start_date} to {end_date}...")
+            output_file = f"{output_prefix}_{suffix}.csv"
+            future = executor.submit(reshape_traffic_data, input_file, output_file, start_date, end_date)
+            future_to_range[future] = (start_date, end_date, suffix)
+        for future in as_completed(future_to_range):
+            start_date, end_date, suffix = future_to_range[future]
+            try:
+                output_path = future.result()
+                print(f"Completed processing for {start_date} to {end_date}: {output_path}")
+                results.append(output_path)
+            except Exception as e:
+                print(f"Error processing range {start_date}-{end_date}: {e}")
     return results
