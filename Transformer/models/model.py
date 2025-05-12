@@ -16,15 +16,15 @@ class PositionalEncoding(nn.Module):
         div_term = torch.exp(torch.arange(0, d_model, 2).float() * (-math.log(10000.0) / d_model))
 
         pe = torch.zeros(max_len, d_model)
-        pe[:, 0::2] = torch.sin(position * div_term)
+        pe[:, 0::2] = torch.sin(position * div_term)        
         pe[:, 1::2] = torch.cos(position * div_term)
 
         pe = pe.unsqueeze(0)
         self.register_buffer('pe', pe)
-
+        
     def forward(self, x):
-        x = x + self.pe[:, :x.size(1), :]
-        return x
+        # Add positional encoding (non-in-place addition)
+        return x + self.pe[:, :x.size(1), :]
 
 class TransformerModel(nn.Module):
     def __init__(self, input_dim, d_model, num_heads, d_ff, output_size=1, num_layers=2, dropout=0.1,
@@ -177,15 +177,14 @@ class TransformerModel(nn.Module):
         dec_output = tgt
         for layer in self.decoder_layers:
             dec_output = layer(dec_output, enc_output, look_ahead_mask)
-            
-        # Global average pooling across sequence dimension with added epsilon for numerical stability
+              # Global average pooling across sequence dimension with added epsilon for numerical stability
         dec_output = dec_output.sum(dim=1) / (tgt.size(1) + 1e-10)
         
         # Final projection to output dimension
         output = self.fc(self.dropout(dec_output))
         
         return output
-
+        
     def forward(self, src, pred_len=1):
         """
         Forward pass of the transformer model with autoregressive prediction
@@ -214,22 +213,66 @@ class TransformerModel(nn.Module):
         for t in range(pred_len):
             # Get prediction for current time step
             output = self.decode(curr_input, enc_output)  # Shape: [batch_size, 1]
-            
-            # Store the prediction
-            predictions[:, t] = output.squeeze()
+            # Store the prediction (using scatter_ to avoid in-place operation)
+            predictions = torch.scatter(predictions, 1, torch.tensor([[t]] * batch_size, device=device), output)
             
             # If we're not at the last time step, prepare input for next prediction
             if t < pred_len - 1:
                 # Create a copy of the current input
                 next_input = curr_input.clone()
                 
+                # Update time features for the next step (assuming 15-min intervals)
+                # Time features indices:
+                # hour_sin (idx 4), hour_cos (idx 5), minute_sin (idx 6), minute_cos (idx 7)
+                
+                # Calculate next minute and hour in normalized form (0-1)
+                # Assuming 15-minute increments
+                # Extract the current normalized time values
+                current_hour_sin = next_input[:, 0, 4]
+                current_hour_cos = next_input[:, 0, 5]
+                current_minute_sin = next_input[:, 0, 6]
+                current_minute_cos = next_input[:, 0, 7]
+                
+                # Convert sine and cosine values back to normalized time (0-1)
+                current_hour_norm = torch.atan2(-current_hour_cos, current_hour_sin) / (2 * torch.pi)
+                current_hour_norm = torch.where(current_hour_norm < 0, current_hour_norm + 1, current_hour_norm)
+                
+                current_minute_norm = torch.atan2(-current_minute_cos, current_minute_sin) / (2 * torch.pi)
+                current_minute_norm = torch.where(current_minute_norm < 0, current_minute_norm + 1, current_minute_norm)
+                # Convert to actual hour and minute
+                current_hour = current_hour_norm * 23
+                current_minute = current_minute_norm * 59
+                
+                # Add 15 minutes
+                current_minute = current_minute + 15
+                # Handle minute overflow
+                hour_increment = torch.floor(current_minute / 60)
+                current_minute = current_minute % 60
+                current_hour = (current_hour + hour_increment) % 24
+                
+                # Convert back to normalized form
+                next_hour_norm = current_hour / 23
+                next_minute_norm = current_minute / 59
+                
+                # Convert to sine and cosine representations
+                next_hour_sin = torch.sin(2 * torch.pi * next_hour_norm)
+                next_hour_cos = torch.cos(2 * torch.pi * next_hour_norm)
+                next_minute_sin = torch.sin(2 * torch.pi * next_minute_norm)
+                next_minute_cos = torch.cos(2 * torch.pi * next_minute_norm)
+                  # Update time features
+                next_input_updated = next_input.clone()
+                next_input_updated[:, 0, 4] = next_hour_sin
+                next_input_updated[:, 0, 5] = next_hour_cos
+                next_input_updated[:, 0, 6] = next_minute_sin
+                next_input_updated[:, 0, 7] = next_minute_cos
+                
                 # Find the index of the Flow_scaled column (last column in our features)
-                flow_idx = next_input.size(2) - 1
+                flow_idx = next_input_updated.size(2) - 1
                 
                 # Update the flow value with our prediction for the next time step
-                next_input[:, 0, flow_idx] = output.squeeze()
+                next_input_updated[:, 0, flow_idx] = output.squeeze()
                 
                 # Use this as input for the next time step
-                curr_input = next_input
+                curr_input = next_input_updated
         
         return predictions
