@@ -101,14 +101,32 @@ class TrafficDataTransformer:
             missing = set(selected_cols) - set(available_cols)
             print(f"Warning: Some columns are missing: {missing}")
             
-        df_selected = df[available_cols].copy()
-        
-        # Filter out rows with negative or missing values (e.g., -1023 indicates errors/missing data)
+        df_selected = df[available_cols].copy()        # Filter out rows with negative or missing values (e.g., -1023 indicates errors/missing data)
         initial_rows = len(df_selected)
-        for col in flow_cols:
-            df_selected = df_selected[df_selected[col] >= 0]
+        
+        # First, drop any rows with NaN/missing values in the flow columns
+        df_selected = df_selected.dropna(subset=flow_cols)
+        missing_filtered_rows = len(df_selected)
+        missing_count = initial_rows - missing_filtered_rows
+        
+        # Then, filter out ONLY rows with NEGATIVE values in any flow column (keep zeros)
+        mask = (df_selected[flow_cols] >= 0).all(axis=1)
+        df_selected = df_selected[mask]
+        
         filtered_rows = len(df_selected)
-        print(f"Filtered out {initial_rows - filtered_rows} rows with negative values")
+        negative_count = missing_filtered_rows - filtered_rows
+        
+        print(f"Filtered out {missing_count} rows with missing values and {negative_count} rows with negative values")
+        print(f"Total rows removed: {initial_rows - filtered_rows} ({((initial_rows - filtered_rows) / initial_rows * 100):.2f}% of original data)")
+        
+        # Add additional check to confirm zero values are preserved
+        zero_count = ((df_selected[flow_cols] == 0).sum().sum())
+        print(f"Dataset contains {zero_count} zero values across all flow columns")
+        
+        # Print min/max values for verification
+        min_vals = df_selected[flow_cols].min().min()
+        max_vals = df_selected[flow_cols].max().max()
+        print(f"Flow values range: min={min_vals}, max={max_vals}")
         
         # Check if we still have data after filtering
         if df_selected.empty:
@@ -216,7 +234,7 @@ class TrafficDataTransformer:
         print("Creating sample data from 2014...")
         
         # Use only the first year (2014) and limit to a few days for the sample
-        sample_year = '2014'
+        sample_year = '2024'
         
         # Read a limited set of files
         raw_data = self.read_data_files(sample_year, limit=5)

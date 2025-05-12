@@ -47,13 +47,29 @@ def reshape_traffic_data(input_file, output_file, start_date=None, end_date=None
                 
             # Convert back to string format for consistency
             chunk['date'] = chunk['date'].dt.strftime('%Y-%m-%d')
-        
         # Select the columns to keep in the final output
         id_vars = ['NB_SCATS_SITE', 'date', 'scat_type', 'day_type', 'school_count']
+        # Get all V*_0 or V*_0.0 columns
+        flow_columns = [col for col in chunk.columns if col.startswith('V') and (col.endswith('_0') or col.endswith('_0.0'))]
         
-        # Get all V*_0 columns
-        flow_columns = [col for col in chunk.columns if col.startswith('V') and col.endswith('_0')]
+        if len(flow_columns) == 0:
+            print(f"WARNING: No flow columns found in chunk {i+1}. Available columns: {chunk.columns.tolist()}")
+            continue
+            
+        print(f"Chunk {i+1}: Found {len(flow_columns)} flow columns. First few: {flow_columns[:5]}...")
+        print(f"Chunk {i+1}: Number of rows before melt: {len(chunk)}")
         
+        # Verify that id_vars columns exist in the chunk
+        missing_id_cols = [col for col in id_vars if col not in chunk.columns]
+        if missing_id_cols:
+            print(f"WARNING: Missing required ID columns in chunk {i+1}: {missing_id_cols}")
+            print(f"Available columns: {chunk.columns.tolist()}")
+            # Try to use only available columns
+            id_vars = [col for col in id_vars if col in chunk.columns]
+            if not id_vars:
+                print(f"ERROR: No ID columns available, skipping chunk {i+1}")
+                continue
+                
         # Melt the dataframe to convert from wide to long format
         long_chunk = pd.melt(
             chunk,
@@ -62,6 +78,19 @@ def reshape_traffic_data(input_file, output_file, start_date=None, end_date=None
             var_name='time_idx',
             value_name='Flow'
         )
+        
+        print(f"Chunk {i+1}: Number of rows after melt: {len(long_chunk)}")
+        # Check for any rows with NaN in Flow
+        nan_count = long_chunk['Flow'].isna().sum()
+        if nan_count > 0:
+            print(f"WARNING: Found {nan_count} rows with NaN Flow values in chunk {i+1}")
+            # Don't drop NaN values here, keep them for debugging
+        
+        # Check for negative flow values
+        neg_count = (long_chunk['Flow'] < 0).sum()
+        if neg_count > 0:
+            print(f"WARNING: Found {neg_count} rows with negative Flow values in chunk {i+1}")
+            # Don't filter here, keep them for debugging
         
         # Convert time_idx (e.g., V00_0, V01_0) to actual time
         long_chunk['time'] = long_chunk['time_idx'].apply(create_time_column)
@@ -83,10 +112,26 @@ def reshape_traffic_data(input_file, output_file, start_date=None, end_date=None
         # Free memory
         del long_chunk
         del result_chunk
-    
-    print(f"Combining processed chunks...")
+        print(f"Combining processed chunks...")
     # Combine all chunks
-    result = pd.concat(chunks, ignore_index=True)
+    if not chunks:
+        print("ERROR: No chunks were processed successfully, result will be empty!")
+        result = pd.DataFrame()
+    else:
+        result = pd.concat(chunks, ignore_index=True)
+        
+        # Additional debug information
+        print(f"Data shape before saving: {result.shape}")
+        if len(result) > 0:
+            print(f"Flow column stats: min={result['Flow'].min()}, max={result['Flow'].max()}, mean={result['Flow'].mean():.2f}")
+            print(f"Number of sites: {result['NB_SCATS_SITE'].nunique()}")
+            print(f"Number of dates: {result['date'].nunique()}")
+            print(f"Sample of first few rows:")
+            print(result.head(3))
+        else:
+            print("WARNING: Result dataframe is empty! Checking chunks for issues...")
+            for i, chunk in enumerate(chunks):
+                print(f"Chunk {i+1} shape: {chunk.shape}")
     
     print(f"Writing reshaped data to {output_file}...")
     # Write the result to a CSV file
