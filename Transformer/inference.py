@@ -51,6 +51,59 @@ def parse_args():
     return parser.parse_args()
 
 
+def get_embedding_dimensions_from_model_file(model_path):
+    """Extract embedding dimensions from a saved model file.
+    
+    Args:
+        model_path: Path to the saved model file
+        
+    Returns:
+        Dictionary with categorical feature metadata extracted from the model
+    """
+    # Load the model state dict
+    state_dict = torch.load(model_path, map_location=torch.device('cpu'))
+    
+    # Extract embedding dimensions
+    categorical_metadata = {}
+    categorical_indices = {}
+    
+    # Find all embedding layers in the state dict
+    for key in state_dict.keys():
+        if 'embedding_layers' in key and 'weight' in key:
+            # Extract feature name from key, format: embedding_layers.{feature_name}.weight
+            feature_name = key.split('.')[1]
+            
+            # Get weight shape
+            weight_shape = state_dict[key].shape
+            num_classes, embedding_dim = weight_shape
+            
+            # Store metadata
+            categorical_metadata[feature_name] = {
+                'num_classes': num_classes,
+                'embedding_dim': embedding_dim
+            }
+    
+    # Define categorical feature indices based on a standard feature order
+    feature_cols = [
+        'day_of_week_sin', 'day_of_week_cos',  # Date features
+        'month_sin', 'month_cos',
+        'hour_sin', 'hour_cos',  # Time features
+        'minute_sin', 'minute_cos',
+        'NB_SCATS_SITE_encoded',  # Site ID
+        'scat_type_encoded',  # Scat type
+        'day_type_encoded',  # Day type
+        'school_count_scaled',  # Standardized school count
+        'Flow_scaled'  # Standardized flow (target)
+    ]
+    
+    # Define categorical feature indices
+    categorical_indices = {
+        'NB_SCATS_SITE': feature_cols.index('NB_SCATS_SITE_encoded'),
+        'day_type': feature_cols.index('day_type_encoded')
+    }
+    
+    return categorical_metadata, categorical_indices
+
 def load_model(model_path, model_params, categorical_metadata, categorical_indices):
     """Load the trained model.
     
@@ -62,7 +115,14 @@ def load_model(model_path, model_params, categorical_metadata, categorical_indic
         
     Returns:
         Loaded model
-    """
+    """    # Get embedding dimensions from the saved model
+    saved_categorical_metadata, saved_categorical_indices = get_embedding_dimensions_from_model_file(model_path)
+    
+    # Use the dimensions from the saved model instead of inferred ones
+    if saved_categorical_metadata:
+        categorical_metadata = saved_categorical_metadata
+        categorical_indices = saved_categorical_indices
+    
     # Create model with output_size=1 to match the saved model
     model = TransformerModel(
         input_dim=model_params['input_dim'],
@@ -76,13 +136,14 @@ def load_model(model_path, model_params, categorical_metadata, categorical_indic
         categorical_indices=categorical_indices
     )
     
+    # Load the saved state dict
     model.load_state_dict(torch.load(model_path, map_location=torch.device('cpu')))
     model.eval()
     
     return model
 
 
-def prepare_data_for_inference(data_collector, df, index, args, seq_len=24):
+def prepare_data_for_inference(data_collector, df, index, args, model_metadata, seq_len=24):
     """Prepare data for inference.
     
     Args:
@@ -90,6 +151,7 @@ def prepare_data_for_inference(data_collector, df, index, args, seq_len=24):
         df: DataFrame with the test data
         index: Index of the row to predict from
         args: Command line arguments
+        model_metadata: Dictionary with metadata from the saved model
         seq_len: Number of time steps to use for prediction
         
     Returns:
@@ -107,14 +169,34 @@ def prepare_data_for_inference(data_collector, df, index, args, seq_len=24):
     # Get SCATS site ID for the row of interest
     site_id = df.loc[index, 'NB_SCATS_SITE']
     
+    # Use the categorical_indices from the model metadata
+    categorical_indices = model_metadata['categorical_indices']
+    categorical_metadata = model_metadata['categorical_metadata']
+    
+    # Pre-process the data to handle potential unknown categories
+    # For each categorical feature, ensure it exists in the trained encoder
+    
+    # Handle NB_SCATS_SITE - map unknown values to a default value
+    known_sites = data_collector.site_encoder.classes_
+    df_processed['NB_SCATS_SITE'] = df_processed['NB_SCATS_SITE'].apply(
+        lambda x: x if x in known_sites else known_sites[0]
+    )
+    
+    # Handle day_type - map unknown values to a default value
+    known_day_types = data_collector.day_type_encoder.classes_
+    df_processed['day_type'] = df_processed['day_type'].apply(
+        lambda x: x if x in known_day_types else known_day_types[0]
+    )
+    
     # Process categorical features
-    df_processed['NB_SCATS_SITE_encoded'] = data_collector.site_encoder.fit_transform(df_processed['NB_SCATS_SITE'])
-    df_processed['scat_type_encoded'] = data_collector.scat_type_encoder.fit_transform(df_processed['scat_type'])
-    df_processed['day_type_encoded'] = data_collector.day_type_encoder.fit_transform(df_processed['day_type'])
+    # IMPORTANT: Use transform to maintain consistency with training
+    df_processed['NB_SCATS_SITE_encoded'] = data_collector.site_encoder.transform(df_processed['NB_SCATS_SITE'])
+    df_processed['scat_type_encoded'] = data_collector.scat_type_encoder.transform(df_processed['scat_type'])
+    df_processed['day_type_encoded'] = data_collector.day_type_encoder.transform(df_processed['day_type'])
     
     # Standardize numerical features
-    df_processed['school_count_scaled'] = data_collector.school_count_scaler.fit_transform(df_processed[['school_count']])
-    df_processed['Flow_scaled'] = data_collector.flow_scaler.fit_transform(df_processed[['Flow']])
+    df_processed['school_count_scaled'] = data_collector.school_count_scaler.transform(df_processed[['school_count']])
+    df_processed['Flow_scaled'] = data_collector.flow_scaler.transform(df_processed[['Flow']])
     
     # Create feature columns list (must match the order in training)
     feature_cols = [
@@ -128,27 +210,6 @@ def prepare_data_for_inference(data_collector, df, index, args, seq_len=24):
         'school_count_scaled',  # Standardized school count
         'Flow_scaled'  # Standardized flow (target)
     ]
-    
-    # Define categorical feature indices 
-    categorical_indices = {
-        'NB_SCATS_SITE': feature_cols.index('NB_SCATS_SITE_encoded'),
-        'day_type': feature_cols.index('day_type_encoded')
-    }
-    
-    # Get metadata for categorical features
-    site_classes = len(data_collector.site_encoder.classes_)
-    day_type_classes = len(data_collector.day_type_encoder.classes_)
-    
-    categorical_metadata = {
-        'NB_SCATS_SITE': {
-            'num_classes': site_classes,
-            'embedding_dim': data_collector.embedding_dim
-        },
-        'day_type': {
-            'num_classes': day_type_classes,
-            'embedding_dim': data_collector.embedding_dim
-        }
-    }
     
     # Select features for the input sequence (index-seq_len+1 to index)
     features = df_processed.loc[index-seq_len+1:index, feature_cols].values
@@ -348,17 +409,6 @@ def main():
     print(f"Using device: {device}")
     
     try:
-        # Create a data collector
-        data_collector = TrafficDataCollector(embedding_dim=args.embedding_dim)
-        
-        # Load the test file
-        print(f"Loading test data from {args.input_path}...")
-        df = pd.read_csv(args.input_path)
-        
-        # Prepare data for inference
-        print(f"Preparing data for inference at index {args.index}...")
-        inference_data = prepare_data_for_inference(data_collector, df, args.index, args)
-        
         # Set model path
         if args.model_path is None:
             args.model_path = os.path.join(
@@ -367,11 +417,48 @@ def main():
                 'transformer_traffic_model.pth'
             )
         
-        print(f"Loading model from {args.model_path}...")
+        print(f"Loading model metadata from {args.model_path}...")
         
         # Check if model file exists
         if not os.path.exists(args.model_path):
             raise FileNotFoundError(f"Model file not found at {args.model_path}")
+            
+        # Get embedding dimensions and categorical indices from the model file
+        categorical_metadata, categorical_indices = get_embedding_dimensions_from_model_file(args.model_path)
+        
+        # Prepare model metadata dictionary
+        model_metadata = {
+            'categorical_metadata': categorical_metadata,
+            'categorical_indices': categorical_indices
+        }
+        
+        # Create a data collector (without fitting any encoders yet)
+        data_collector = TrafficDataCollector(embedding_dim=args.embedding_dim)
+        
+        # Initialize encoders with the correct number of classes from the model
+        # Create mock data for fitting encoders to match the saved model's dimensions
+        site_classes = categorical_metadata['NB_SCATS_SITE']['num_classes']
+        day_type_classes = categorical_metadata['day_type']['num_classes']
+        
+        # Load the test file
+        print(f"Loading test data from {args.input_path}...")
+        df = pd.read_csv(args.input_path)
+        
+        # Get unique site and day type values from the data
+        unique_sites = df['NB_SCATS_SITE'].unique()
+        unique_day_types = df['day_type'].unique()
+        
+        # We need to ensure our encoders have the right number of classes to match the model
+        # Here we're fitting the encoders with all data from the dataset
+        data_collector.site_encoder.fit(df['NB_SCATS_SITE'])
+        data_collector.scat_type_encoder.fit(df['scat_type'])
+        data_collector.day_type_encoder.fit(df['day_type'])
+        data_collector.school_count_scaler.fit(df[['school_count']])
+        data_collector.flow_scaler.fit(df[['Flow']])
+        
+        # Prepare data for inference
+        print(f"Preparing data for inference at index {args.index}...")
+        inference_data = prepare_data_for_inference(data_collector, df, args.index, args, model_metadata)
         
         # Set model parameters
         model_params = {

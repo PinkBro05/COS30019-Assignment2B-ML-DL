@@ -298,7 +298,7 @@ def parse_args():
                         help='Batch size for training')
     parser.add_argument('--shuffle', action='store_true', default=True,
                         help='Shuffle the training data')
-    parser.add_argument('--num_workers', type=int, default=0,
+    parser.add_argument('--num_workers', type=int, default=4,
                         help='Number of workers for data loading')
     parser.add_argument('--train_ratio', type=float, default=0.7,
                         help='Ratio of training data')
