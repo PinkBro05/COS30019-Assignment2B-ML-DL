@@ -421,12 +421,12 @@ def feature_engineering(base_dir, transformed_files=None):
     
     # Get files to process
     if transformed_files is None:
-        # Get all transformed data files for years 2014-2024
+        # Get all transformed data files for years 2014-2025
         pattern = os.path.join(transformed_dir, "*_transformed_scats_data.csv")
         files = glob(pattern)
         
-        # Filter for years 2014-2024
-        files = [f for f in files if any(str(year) in f for year in range(2014, 2025))]
+        # Filter for years 2014-2025
+        files = [f for f in files if any(str(year) in f for year in range(2014, 2026))]
     else:
         files = transformed_files if isinstance(transformed_files, list) else [transformed_files]
     

@@ -230,9 +230,9 @@ class TrafficDataTransformer:
     
     def create_sample(self):
         """Create a sample of transformed data from the first few days of a specified year."""
-        print("Creating sample data from 2014...")
+        print("Creating sample data from 2024...")
         
-        # Use only the first year (2014) and limit to a few days for the sample
+        # Use only the first year (2024) and limit to a few days for the sample
         sample_year = '2024'
         
         # Read a limited set of files
