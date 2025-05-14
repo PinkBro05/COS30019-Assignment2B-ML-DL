@@ -107,7 +107,7 @@ def train_transformer(
                 X_batch, y_batch = X_batch.to(device), y_batch.to(device)
                 
                 # Get prediction length from target
-                pred_len = y_batch.size(1)
+                pred_len = y_batch.size(1) # 4 step ahead prediction
                 
                 # Forward pass with autoregressive prediction
                 outputs = model(X_batch, pred_len=pred_len)

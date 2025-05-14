@@ -112,7 +112,7 @@ class TrafficDataCollector:
         
         return df
     
-    def process_data(self, input_file, seq_len=24, pred_len=4, step_size=4):
+    def process_data(self, input_file, seq_len=24, pred_len=1, step_size=4):
         """Process data from a CSV file.
         
         Args:
@@ -248,7 +248,7 @@ class TrafficDataCollector:
         
         return data
     
-    def process_data_in_chunks(self, input_file, chunk_size=100000, seq_len=24, pred_len=4, step_size=4, initialize_encoders=True):
+    def process_data_in_chunks(self, input_file, chunk_size=100000, seq_len=24, pred_len=1, step_size=4, initialize_encoders=True):
         """Process data from a CSV file in chunks to handle large datasets.
         
         Args:
