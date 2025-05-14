@@ -149,34 +149,30 @@ class AutoTuner:
             
         Returns:
             Validation loss (to be minimized)
-        """        # First select d_model to ensure compatibility with num_heads
+        """
+        # Select d_model and num_heads
         d_model = trial.suggest_categorical('d_model', [64, 128, 256, 384])
-        
-        # Calculate valid num_heads values (must be divisors of d_model)
-        valid_heads = [h for h in [1, 2, 4, 8, 16] if d_model % h == 0 and h <= d_model//8]
-        
-        # Ensure there's at least one valid option (fallback to 1 if needed)
-        if not valid_heads:
-            valid_heads = [1]  # 1 is always a valid divisor
-            print(f"Warning: No valid head values found for d_model={d_model}, using num_heads=1")
-            
+        num_heads = trial.suggest_categorical('num_heads', [1, 2, 4, 8, 16])
+        # Reject invalid combinations
+        if d_model % num_heads != 0 or num_heads > d_model // 8:
+            return float('inf')
         # Define hyperparameters to tune
         params = {
             # Data parameters
             'embedding_dim': trial.suggest_categorical('embedding_dim', [8, 16, 32]),
             'batch_size': trial.suggest_categorical('batch_size', [16, 32, 64, 128]),
-            
+
             # Model parameters
-            'd_model': d_model,  # Already selected above
-            'num_heads': trial.suggest_categorical('num_heads', valid_heads),  # Only valid options
+            'd_model': d_model,
+            'num_heads': num_heads,
             'd_ff': trial.suggest_categorical('d_ff', [128, 256, 512, 1024]),
             'num_layers': trial.suggest_int('num_layers', 1, 4),
             'dropout': trial.suggest_float('dropout', 0.0, 0.5),
-            
+
             # Training parameters
             'learning_rate': trial.suggest_loguniform('learning_rate', 1e-5, 1e-3),
             'weight_decay': trial.suggest_loguniform('weight_decay', 1e-6, 1e-4),
-            'num_epochs': trial.suggest_int('num_epochs', 5, 20)  # Limit epochs for faster tuning
+            'num_epochs': trial.suggest_int('num_epochs', 5, 20)
         }
           # Load data with these parameters
         data_loaders = self._load_data(params)
@@ -267,8 +263,7 @@ class AutoTuner:
             # Save the model if it's among the top performers
             if (not math.isnan(best_val_loss) and 
                 not math.isinf(best_val_loss) and 
-                not trial.should_prune() and 
-                trial.state == optuna.trial.TrialState.RUNNING):
+                not trial.should_prune()):
                 # Save only if the trial is in the top 5 so far
                 study = trial.study
                 sorted_trials = sorted(study.trials, key=lambda t: t.value if t.value is not None else float('inf'))
@@ -277,7 +272,11 @@ class AutoTuner:
                     self._save_model(model, model_path, params, categorical_metadata, history)
             
             return best_val_loss
+        except optuna.exceptions.TrialPruned:
+            # Propagate pruning exception to Optuna
+            raise
         except Exception as e:
+            # Catch unexpected errors and return a large loss
             print(f"Error during training: {str(e)}")
             import traceback
             traceback.print_exc()
@@ -434,10 +433,8 @@ class AutoTuner:
         # Save model metadata
         metadata_path = model_file.replace('.pth', '_metadata.json')
         save_model_metadata(
-            path=metadata_path,
-            params=best_params,
-            categorical_metadata=categorical_metadata,
-            history=history
+            filepath=metadata_path,
+            model=model,
         )
         
         # Plot training history

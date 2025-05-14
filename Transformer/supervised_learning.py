@@ -208,14 +208,15 @@ def train_transformer(
         print("\n" + "="*20 + f" Epoch {epoch+1}/{num_epochs} " + "="*20)
         print(f"Train Loss (MSE): {train_loss:.6f}, Val Loss (MSE): {val_loss:.6f}")
         print(f"Learning Rate: {current_lr:.8f}, Time: {end_time - start_time:.2f}s")
-          # Save the best model with improved logging
-        if val_loss < best_val_loss and save_path:
+        # Save the best model with improved logging
+        if val_loss < best_val_loss:
             print(f"Validation loss improved from {best_val_loss:.6f} to {val_loss:.6f}")
-            print(f"Saved!")
             best_val_loss = val_loss
-            torch.save(model.state_dict(), save_path)
-            # Save model metadata for embedding layer size info
-            save_model_metadata(model, save_path)
+            if save_path:
+                print(f"Saved!")
+                torch.save(model.state_dict(), save_path)
+                # Save model metadata for embedding layer size info
+                save_model_metadata(model, save_path)
         else:
             print(f"Validation loss not improved - best: {best_val_loss:.6f}")
     
