@@ -8,7 +8,7 @@ from datetime import datetime
 
 # Add parent directory to path
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from Transformer.auto_tuner import run_auto_tuning
+from Transformer.utils.auto_tuner import run_auto_tuning
 
 def main():
     parser = argparse.ArgumentParser(description='Run AutoTuner for the Transformer model')

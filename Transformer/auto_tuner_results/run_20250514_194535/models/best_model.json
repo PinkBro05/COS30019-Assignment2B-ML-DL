@@ -1,0 +1,22 @@
+{
+  "categorical_metadata": {
+    "NB_SCATS_SITE": {
+      "num_classes": 1,
+      "embedding_dim": 16
+    },
+    "day_type": {
+      "num_classes": 9,
+      "embedding_dim": 16
+    }
+  },
+  "categorical_indices": {
+    "NB_SCATS_SITE": 8,
+    "day_type": 10
+  },
+  "input_dim": 43,
+  "training": false,
+  "embedding_dims": {
+    "NB_SCATS_SITE": 16,
+    "day_type": 16
+  }
+}

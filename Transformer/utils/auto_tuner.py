@@ -43,12 +43,17 @@ class AutoTuner:
             random_seed: Random seed for reproducibility
         """
         self.data_file = data_file
-        
-        # Set device
+          # Set device
         if device is None:
-            self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+            if torch.cuda.is_available():
+                self.device = torch.device("cuda")
+                print(f"Using GPU: {torch.cuda.get_device_name(0)}")
+            else:
+                raise RuntimeError("CUDA is not available. GPU is required for training.")
         else:
             self.device = device
+            if self.device.type == "cpu":
+                print("WARNING: CPU device was explicitly specified. Training may be slow.")
             
         # Set random seeds for reproducibility
         torch.manual_seed(random_seed)
@@ -430,13 +435,6 @@ class AutoTuner:
             max_grad_norm=1.0
         )
         
-        # Save model metadata
-        metadata_path = model_file.replace('.pth', '_metadata.json')
-        save_model_metadata(
-            filepath=metadata_path,
-            model=model,
-        )
-        
         # Plot training history
         self._plot_training_history(history, best_params)
         
@@ -521,7 +519,7 @@ class AutoTuner:
             device=self.device,
             test_loader=test_loader,
             encoders_scalers=encoders_scalers,
-            save_dir=self.figures_dir
+            figures_dir=self.figures_dir
         )
         
         return metrics
@@ -540,12 +538,18 @@ def run_auto_tuning(data_file, output_dir=None, n_trials=50, test_size=0.2, fina
     Returns:
         Dictionary with best parameters and metrics
     """
-    # Create AutoTuner
+    # Verify CUDA is available
+    if not torch.cuda.is_available():
+        raise RuntimeError("CUDA is not available. GPU is required for training.")
+    
+    # Create AutoTuner with CUDA device
+    device = torch.device("cuda")
     tuner = AutoTuner(
         data_file=data_file,
         output_dir=output_dir,
         n_trials=n_trials,
-        test_size=test_size
+        test_size=test_size,
+        device=device
     )
     
     # Run optimization
