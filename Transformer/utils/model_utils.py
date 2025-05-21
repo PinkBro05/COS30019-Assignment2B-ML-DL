@@ -63,9 +63,6 @@ def load_model_with_embedding_fix(model, model_path, device):
     Load a model with a fix for embedding layer size mismatches
     
     This function handles embedding dimension mismatches when loading pre-trained models.
-    Specifically, it addresses issues with:
-    1. NB_SCATS_SITE embedding layer (4487 vs 1 classes)
-    2. day_type embedding layer (10 vs 9 classes)
     
     Args:
         model: The model instance to load weights into

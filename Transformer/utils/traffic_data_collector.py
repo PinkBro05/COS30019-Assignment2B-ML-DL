@@ -3,9 +3,7 @@ import numpy as np
 import pandas as pd
 import torch
 from torch.utils.data import Dataset, DataLoader
-from datetime import datetime
 from sklearn.preprocessing import StandardScaler, LabelEncoder
-import math
 
 class TrafficDataset(Dataset):
     """Traffic Flow Dataset for Transformer model."""
@@ -25,7 +23,7 @@ class TrafficDataset(Dataset):
         if not isinstance(y, torch.Tensor):
             y = torch.FloatTensor(y)
             
-        # Store the tensors - do NOT move to device here for compatibility with DataLoader's pin_memory
+        # Store the tensors - do NOT move to device here for compatibility with DataLoader's pin_memory (Multiple workers)
         self.X = X
         self.y = y
             
@@ -140,9 +138,9 @@ class TrafficDataCollector:
         df['NB_SCATS_SITE_encoded'] = self.site_encoder.fit_transform(df['NB_SCATS_SITE'])
         site_classes = len(self.site_encoder.classes_)
         
-        # 2. scat_type: categorical encoding
+        # 2. scat_type: categorical encoding. This will only be encoded not embedded yet since number of feature is already large
         df['scat_type_encoded'] = self.scat_type_encoder.fit_transform(df['scat_type'])
-        scat_type_classes = len(self.scat_type_encoder.classes_)
+        scat_type_classes = len(self.scat_type_encoder.classes_) 
         
         # 3. day_type: encode as indices for embedding
         df['day_type_encoded'] = self.day_type_encoder.fit_transform(df['day_type'])

@@ -12,7 +12,7 @@ import torch
 import matplotlib.pyplot as plt
 import pandas as pd
 import random
-from datetime import datetime, timedelta
+from datetime import timedelta
 
 # Add parent directory to path to import from utils
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -31,7 +31,7 @@ def parse_args():
                         help='Row index in the CSV file to use as the prediction point')
     parser.add_argument('--num_steps', type=int, default=4,
                         help='Number of future time steps to predict (default: 4)')
-    parser.add_argument('--model_path', type=str, default="Transformer/save_models/transformer_traffic_model.pth",
+    parser.add_argument('--model_path', type=str, default="Transformer/save_models/2024_4_steps_5_epochs_transformer_traffic_model.pth",
                         help='Path to the saved model (default: uses the model in save_models directory)')
     parser.add_argument('--embedding_dim', type=int, default=16,
                         help='Embedding dimension used during training (must match)')

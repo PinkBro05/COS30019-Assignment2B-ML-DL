@@ -4,7 +4,6 @@ import torch.nn as nn
 import torch.optim as optim
 import numpy as np
 import matplotlib.pyplot as plt
-from torch.utils.data import DataLoader
 import time
 import sys
 import argparse
@@ -208,6 +207,7 @@ def train_transformer(
         print("\n" + "="*20 + f" Epoch {epoch+1}/{num_epochs} " + "="*20)
         print(f"Train Loss (MSE): {train_loss:.6f}, Val Loss (MSE): {val_loss:.6f}")
         print(f"Learning Rate: {current_lr:.8f}, Time: {end_time - start_time:.2f}s")
+        
         # Save the best model with improved logging
         if val_loss < best_val_loss:
             print(f"Validation loss improved from {best_val_loss:.6f} to {val_loss:.6f}")
@@ -215,6 +215,7 @@ def train_transformer(
             if save_path:
                 print(f"Saved!")
                 torch.save(model.state_dict(), save_path)
+                
                 # Save model metadata for embedding layer size info
                 save_model_metadata(model, save_path)
         else:
@@ -937,7 +938,8 @@ def main():
                     categorical_metadata=categorical_metadata,
                     categorical_indices=categorical_indices
                 )
-              # Load model weights with embedding fix for dimension mismatches
+            
+            # Load model weights with embedding fix for dimension mismatches
             print(f"Loading model from {args.model_path} for testing...")
             load_model_with_embedding_fix(model, args.model_path, device)
             

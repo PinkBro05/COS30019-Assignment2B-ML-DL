@@ -1,12 +1,7 @@
 import os
 import pandas as pd
-import numpy as np
 from glob import glob
-from datetime import datetime
 from concurrent.futures import ThreadPoolExecutor, as_completed
-
-from path_utilities import PathManager
-
 
 class TrafficDataTransformer:
     def __init__(self, data_path, years=None, output_path=None):
@@ -41,8 +36,10 @@ class TrafficDataTransformer:
         # Read and combine all CSV files for the year in parallel
         files_to_read = sorted(csv_files)[:limit] if limit else sorted(csv_files)
         dfs = []
+        
         # Use up to CPU count threads
         max_workers = min(len(files_to_read), os.cpu_count() or 1)
+        
         with ThreadPoolExecutor(max_workers=max_workers) as executor:
             future_to_file = {executor.submit(pd.read_csv, file): file for file in files_to_read}
             for future in as_completed(future_to_file):
@@ -99,8 +96,9 @@ class TrafficDataTransformer:
         if len(available_cols) < len(selected_cols):
             missing = set(selected_cols) - set(available_cols)
             print(f"Warning: Some columns are missing: {missing}")
-            
-        df_selected = df[available_cols].copy()        # Filter out rows with negative or missing values (e.g., -1023 indicates errors/missing data)
+        
+        # Filter out rows with negative or missing values (e.g., -1023 indicates errors/missing data)
+        df_selected = df[available_cols].copy()        
         initial_rows = len(df_selected)
         
         # First, drop any rows with NaN/missing values in the flow columns

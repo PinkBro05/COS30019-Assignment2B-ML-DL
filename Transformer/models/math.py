@@ -135,7 +135,12 @@ class PositionWiseFeedForward(nn.Module):
         self._init_weights()
         
     def _init_weights(self):
-        """Initialize the weights for better training stability"""
+        """
+        Initialize the weights for better training stability
+        Using Kaiming (He) uniform initialization for linear layers.
+        
+        Source: https://paperswithcode.com/method/he-initialization
+        """
         for m in [self.fc1, self.fc2]:
             nn.init.kaiming_uniform_(m.weight, a=math.sqrt(5))
             if m.bias is not None:

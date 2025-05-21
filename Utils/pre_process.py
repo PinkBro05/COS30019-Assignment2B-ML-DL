@@ -1,10 +1,8 @@
 import os
 import pandas as pd
 import argparse
-from pathlib import Path
 
 # Import from the modular components
-from path_utilities import PathManager
 from traffic_data_transformation import TrafficDataTransformer
 from feature_engineering import feature_engineering
 from time_series_reshaping import reshape_traffic_data, process_data_in_date_ranges
@@ -33,9 +31,11 @@ def preprocess_traffic_data(data_path=None, years=None, split=False, start_date=
     else:
         # Getting the directory of the current file
         base_dir = os.path.dirname(os.path.abspath(__file__))
+        
         # If we're in the Utils directory, go one level up for the project root
         if os.path.basename(base_dir) == "Utils":
             base_dir = os.path.dirname(base_dir)
+            
         # Now construct data_path
         data_path = os.path.join(base_dir, "Data", "Raw", "main")
     

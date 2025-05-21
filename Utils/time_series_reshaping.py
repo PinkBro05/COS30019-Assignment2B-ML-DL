@@ -1,6 +1,5 @@
 import os
 import pandas as pd
-from glob import glob
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 def create_time_column(time_idx):
@@ -55,6 +54,7 @@ def reshape_traffic_data(input_file, output_file, start_date=None, end_date=None
                 
             # Convert back to string format for consistency
             chunk['date'] = chunk['date'].dt.strftime('%Y-%m-%d')
+            
         # Select the columns to keep in the final output
         id_vars = ['NB_SCATS_SITE', 'date', 'scat_type', 'day_type', 'school_count']
         # Get all V*_0 or V*_0.0 columns
@@ -88,6 +88,7 @@ def reshape_traffic_data(input_file, output_file, start_date=None, end_date=None
         )
         
         print(f"Chunk {i+1}: Number of rows after melt: {len(long_chunk)}")
+        
         # Check for any rows with NaN in Flow
         nan_count = long_chunk['Flow'].isna().sum()
         if nan_count > 0:
@@ -121,6 +122,7 @@ def reshape_traffic_data(input_file, output_file, start_date=None, end_date=None
         del long_chunk
         del result_chunk
         print(f"Combining processed chunks...")
+        
     # Combine all chunks
     if not chunks:
         print("ERROR: No chunks were processed successfully, result will be empty!")
@@ -159,6 +161,7 @@ def process_data_in_date_ranges(input_file, output_prefix, date_ranges):
     date_ranges (list): List of tuples with (start_date, end_date, output_suffix)
     """
     results = []
+    
     # Parallelize date range processing
     with ThreadPoolExecutor(max_workers=min(len(date_ranges), os.cpu_count() or 1)) as executor:
         future_to_range = {}

@@ -8,10 +8,7 @@ import math
 import numpy as np
 import torch
 import matplotlib.pyplot as plt
-from functools import partial
-from sklearn.model_selection import ParameterGrid
 import optuna
-from optuna.visualization import plot_optimization_history, plot_param_importances, plot_slice
 import joblib
 import torch.nn as nn
 import torch.optim as optim
@@ -43,7 +40,8 @@ class AutoTuner:
             random_seed: Random seed for reproducibility
         """
         self.data_file = data_file
-          # Set device
+        
+        # Set device
         if device is None:
             if torch.cuda.is_available():
                 self.device = torch.device("cuda")
@@ -158,9 +156,11 @@ class AutoTuner:
         # Select d_model and num_heads
         d_model = trial.suggest_categorical('d_model', [64, 128, 256, 384])
         num_heads = trial.suggest_categorical('num_heads', [1, 2, 4, 8, 16])
+        
         # Reject invalid combinations
         if d_model % num_heads != 0 or num_heads > d_model // 8:
             return float('inf')
+        
         # Define hyperparameters to tune
         params = {
             # Data parameters
@@ -179,7 +179,8 @@ class AutoTuner:
             'weight_decay': trial.suggest_loguniform('weight_decay', 1e-6, 1e-4),
             'num_epochs': trial.suggest_int('num_epochs', 5, 20)
         }
-          # Load data with these parameters
+        
+        # Load data with these parameters
         data_loaders = self._load_data(params)
         
         if not data_loaders or 'train_loader' not in data_loaders:
@@ -220,6 +221,7 @@ class AutoTuner:
         except Exception as e:
             print(f"Error validating data: {str(e)}")
             return float('inf')
+        
         try:
             # Create model
             model = self._create_model(params, input_dim, categorical_metadata, categorical_indices)
@@ -257,7 +259,8 @@ class AutoTuner:
                 # Handle pruning based on intermediate results
                 if trial.should_prune():
                     raise optuna.exceptions.TrialPruned()
-              # Get best validation loss, with error handling
+            
+            # Get best validation loss, with error handling
             try:
                 best_val_loss = history.get('best_val_loss', min(history['val_loss']))
                 print(f"Best validation loss: {best_val_loss:.6f}")
@@ -265,6 +268,7 @@ class AutoTuner:
             except Exception as e:
                 print(f"Error getting best validation loss: {str(e)}")
                 best_val_loss = float('inf')
+           
             # Save the model if it's among the top performers
             if (not math.isnan(best_val_loss) and 
                 not math.isinf(best_val_loss) and 
@@ -280,6 +284,7 @@ class AutoTuner:
         except optuna.exceptions.TrialPruned:
             # Propagate pruning exception to Optuna
             raise
+        
         except Exception as e:
             # Catch unexpected errors and return a large loss
             print(f"Error during training: {str(e)}")

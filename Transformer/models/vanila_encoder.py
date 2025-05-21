@@ -2,9 +2,7 @@
 Encoder part of the transformer model.
 Contains attention and feed forward modules.
 """
-import torch
 import torch.nn as nn
-import torch.nn.functional as F
 from Transformer.models.math import MultiHeadAttention, PositionWiseFeedForward
 
 class TransformerEncoderLayer(nn.Module):

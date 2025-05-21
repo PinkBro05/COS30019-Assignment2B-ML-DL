@@ -126,14 +126,6 @@ class TransformerModel(nn.Module):
         
         return embedded_x
 
-    def create_masks(self, src_seq_len, tgt_seq_len, device):
-        # Create causal mask for decoder self-attention (directly on the device)
-        look_ahead_mask = torch.triu(torch.ones(tgt_seq_len, tgt_seq_len, device=device), diagonal=1).bool()
-        # Create mask for encoder (directly on the device)
-        src_mask = torch.triu(torch.ones(src_seq_len, src_seq_len, device=device), diagonal=1).bool()
-        
-        return src_mask, look_ahead_mask
-
     def encode(self, src):
         """Encoder forward pass"""
         # Apply embeddings to categorical features
@@ -147,7 +139,7 @@ class TransformerModel(nn.Module):
         src_seq_len = src.size(1)
         device = src.device
         
-        # Create causal mask for encoder (for time-series data) directly on the device
+        # Create causal mask for encoder (for time-series data) directly on the device (Using causual attention for encoder to prevent information leakage)
         src_mask = torch.triu(torch.ones(src_seq_len, src_seq_len, device=device), diagonal=1).bool()
         
         # Pass through encoder layers
@@ -177,7 +169,8 @@ class TransformerModel(nn.Module):
         dec_output = tgt
         for layer in self.decoder_layers:
             dec_output = layer(dec_output, enc_output, look_ahead_mask)
-              # Global average pooling across sequence dimension with added epsilon for numerical stability
+        
+        # Global average pooling across sequence dimension with added epsilon for numerical stability
         dec_output = dec_output.sum(dim=1) / (tgt.size(1) + 1e-10)
         
         # Final projection to output dimension
@@ -213,6 +206,7 @@ class TransformerModel(nn.Module):
         for t in range(pred_len):
             # Get prediction for current time step
             output = self.decode(curr_input, enc_output)  # Shape: [batch_size, 1]
+            
             # Store the prediction (using scatter_ to avoid in-place operation)
             predictions = torch.scatter(predictions, 1, torch.tensor([[t]] * batch_size, device=device), output)
             
@@ -259,7 +253,8 @@ class TransformerModel(nn.Module):
                 next_hour_cos = torch.cos(2 * torch.pi * next_hour_norm)
                 next_minute_sin = torch.sin(2 * torch.pi * next_minute_norm)
                 next_minute_cos = torch.cos(2 * torch.pi * next_minute_norm)
-                  # Update time features
+                
+                # Update time features
                 next_input_updated = next_input.clone()
                 next_input_updated[:, 0, 4] = next_hour_sin
                 next_input_updated[:, 0, 5] = next_hour_cos

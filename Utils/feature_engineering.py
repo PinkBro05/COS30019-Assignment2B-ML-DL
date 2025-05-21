@@ -1,7 +1,6 @@
 import os
 import pandas as pd
 import numpy as np
-import re
 from glob import glob
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
@@ -81,6 +80,7 @@ def prepare_school_data(base_dir):
     records = traffic_df.to_dict('records')
     result_data = []
     max_workers = min(len(records), os.cpu_count() or 1)
+    
     with ThreadPoolExecutor(max_workers=max_workers) as executor:
         future_to_record = {}
         for rec in records:
@@ -440,6 +440,7 @@ def feature_engineering(base_dir, transformed_files=None):
     print(f"Processing {len(files)} feature engineering tasks in parallel...")
     success_files = []
     max_workers = min(len(files), os.cpu_count() or 1)
+    
     with ThreadPoolExecutor(max_workers=max_workers) as executor:
         future_to_file = {executor.submit(process_file, file, scat_type_df, traffic_lights_df, holidays_df, school_dic_df, output_dir): file for file in files}
         for future in as_completed(future_to_file):
@@ -452,4 +453,5 @@ def feature_engineering(base_dir, transformed_files=None):
                 print(f"Error processing file {file}: {e}")
 
     print(f"Feature engineering complete. Successfully processed {len(success_files)} out of {len(files)} files.")
+    
     return success_files
