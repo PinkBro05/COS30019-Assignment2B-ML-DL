@@ -9,38 +9,45 @@ Uses GeoPy for geographical calculations and Folium for visualization.
 import os
 import sys
 import pandas as pd
+import geopandas as gpd
 import folium
-from folium.plugins import MarkerCluster
+from folium.plugins import MarkerCluster, Search
 from PyQt5 import QtWidgets, QtCore
 from PyQt5.QtWebEngineWidgets import QWebEngineView
-qt_webengine_available = True
 
-def read_map_csv(csv_file_path):
+def read_geojson_file(geojson_file_path):
     """
-    Read the map.csv file containing Scats data with longitude and latitude
+    Read the GeoJSON file containing traffic light data with coordinates
     
     Args:
-        csv_file_path (str): Path to the map.csv file
+        geojson_file_path (str): Path to the GeoJSON file
         
     Returns:
-        pandas.DataFrame: DataFrame containing the Scats data
+        geopandas.GeoDataFrame: GeoDataFrame containing the traffic light data
     """
     try:
-        df = pd.read_csv(csv_file_path)
-        print(f"Successfully read {len(df)} locations from {csv_file_path}")
+        # Read GeoJSON using geopandas
+        gdf = gpd.read_file(geojson_file_path)
+        print(f"Successfully read {len(gdf)} traffic light locations from {geojson_file_path}")
+        
+        # Extract longitude and latitude from geometry for easier access
+        gdf['longitude'] = gdf.geometry.x
+        gdf['latitude'] = gdf.geometry.y
+        
         # Display first few rows to verify
-        print(df.head())
-        return df
+        print(gdf[['SITE_NO', 'SITE_NAME', 'SITE_TYPE', 'longitude', 'latitude']].head())
+        
+        return gdf
     except Exception as e:
-        print(f"Error reading CSV file: {e}")
+        print(f"Error reading GeoJSON file: {e}")
         sys.exit(1)
 
-def create_map(df, center=None):
+def create_map(gdf, center=None):
     """
-    Create a minimal interactive map with markers for each location in the DataFrame
+    Create an interactive map with markers for each traffic light location
     
     Args:
-        df (pandas.DataFrame): DataFrame containing locations with 'latitude' and 'longitude' columns
+        gdf (geopandas.GeoDataFrame): GeoDataFrame containing locations with geometry
         center (tuple, optional): Center coordinates for the map (lat, lon). If None, uses the mean of all points.
         
     Returns:
@@ -48,9 +55,9 @@ def create_map(df, center=None):
     """
     if center is None:
         # Calculate the center as the mean of all points
-        center = [df['latitude'].mean(), df['longitude'].mean()]
+        center = [gdf['latitude'].mean(), gdf['longitude'].mean()]
     
-    # Create a minimal map with increased zoom capability
+    # Create a map with increased zoom capability
     m = folium.Map(
         location=center,
         zoom_start=10,
@@ -63,24 +70,36 @@ def create_map(df, center=None):
     marker_cluster = MarkerCluster(
         options={
             'disableClusteringAtZoom': 16,  # Stop clustering at high zoom levels
-            'maxClusterRadius': 80,  # Increase clustering radius for fewer markers at low zoom
-            'spiderfyOnMaxZoom': True  # Spread out markers when clicking on a cluster at max zoom
+            'maxClusterRadius': 100,  # Increase clustering radius for even fewer markers at low zoom
+            'spiderfyOnMaxZoom': True,  # Spread out markers when clicking on a cluster at max zoom
+            'chunkedLoading': True  # Enable chunked loading for better performance
         }
     ).add_to(m)
     
-    # Add minimal markers for each location
-    for idx, row in df.iterrows():
-        popup_text = f"Scats ID: {row['Scats']}"
-        folium.CircleMarker(  # Use CircleMarker instead of Marker with icon for better performance
+    # Add markers for each location directly to the cluster without GeoJSON layer
+    # This improves performance significantly
+    for idx, row in gdf.iterrows():
+        # Create popup text with relevant information
+        popup_text = f"Site No: {row['SITE_NO']}<br>Name: {row['SITE_NAME']}<br>Type: {row['SITE_TYPE']}"
+        if pd.notna(row['COMMENTS']) and row['COMMENTS']:
+            popup_text += f"<br>Comments: {row['COMMENTS']}"
+            
+        # Add circle marker to cluster - more efficient than regular markers
+        circle_marker = folium.CircleMarker(
             location=[row['latitude'], row['longitude']],
             popup=popup_text,
             radius=4,
             color='#3186cc',
             fill=True,
             fill_color='#3186cc',
-            fill_opacity=0.7
-        ).add_to(marker_cluster)
+            fill_opacity=0.7,
+            tooltip=f"Site: {row['SITE_NO']} - {row['SITE_NAME']}"  # Add tooltip for hover information
+        )
+        circle_marker.add_to(marker_cluster)
     
+    # Add layer control
+    folium.LayerControl().add_to(m)
+        
     return m
 
 def main():
@@ -90,29 +109,30 @@ def main():
     # Get the absolute path to the project directory
     project_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     
-    # Path to the map.csv file
-    map_csv_path = os.path.join(project_dir, 'Data', 'map.csv')
+    # Path to the GeoJSON file
+    geojson_path = os.path.join(project_dir, 'Data', 'Traffic_Lights.geojson')
     
-    # Read the CSV file
-    df = read_map_csv(map_csv_path)
+    # Read the GeoJSON file
+    gdf = read_geojson_file(geojson_path)
     
     # Create the map
-    m = create_map(df)
+    m = create_map(gdf)
     
     # Display statistics
-    print(f"Total locations: {len(df)}")
+    print(f"Total traffic light locations: {len(gdf)}")
     
     # Save map to HTML file
     output_file = os.path.join(project_dir, 'map_output.html')
     m.save(output_file)
+    print(f"Map saved to {output_file}")
 
     # Create a PyQt5 application to display the map
     app = QtWidgets.QApplication(sys.argv)
     
     # Create a QWebEngineView instance
     view = QWebEngineView()
-    view.setWindowTitle("Traffic Scats Locations")
-    view.setGeometry(100, 100, 800, 600)
+    view.setWindowTitle("Traffic Light Locations")
+    view.setGeometry(100, 100, 1024, 768)  # Slightly larger window for better visibility
     
     # Load the HTML file
     view.load(QtCore.QUrl.fromLocalFile(os.path.abspath(output_file)))
