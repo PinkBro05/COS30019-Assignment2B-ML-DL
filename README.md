@@ -9,21 +9,21 @@ This project focuses on estimating travel time using traffic flow data with vari
 ├── Data/
 |   ├── Data_dictionary.docx   # Contain metadata and note about the datasets
 │   ├── Raw/                    # Raw traffic data files
-│   │   └── main/               # Contains original SCATS traffic flow data by year
-│   │       ├── 2014/           # Traffic data for 2014 (VSDATA_*.csv files)
-│   │       ├── 2025_public_holiday.csv # Public holiday data
-│   │       ├── Scat_Data.csv   # SCATS data information
-│   │       ├── scat_type.csv   # Types of SCATS sites
-│   │       ├── school.csv      # School location data
-│   │       ├── Traffic_Lights.csv # Traffic light location data
-│   │       └── Traffic_Lights.geojson # GeoJSON for traffic lights
+│   │   ├── main/               # Contains original SCATS traffic flow data by year
+│   │   │   ├── 2014/           # Traffic data for 2014 (VSDATA_*.csv files)
+│   │   │   ├── 2025_public_holiday.csv # Public holiday data
+│   │   │   ├── Scat_Data.csv   # SCATS data information
+│   │   │   ├── scat_type.csv   # Types of SCATS sites
+│   │   │   ├── school.csv      # School location data
+│   │   │   ├── Traffic_Lights.csv # Traffic light location data
+│   │   │   └── Traffic_Lights.geojson # GeoJSON for traffic lights
+│   │   └── metadata and excel file/ #Unit Files 
 │   └── Transformed/            # Preprocessed and transformed data ready for models
 │       ├── _sample_final_time_series.csv # Sample of time series data
 │       ├── _sample_final.csv   # Sample of transformed data
 │       ├── 2006_final_scats_data.csv # Unit provided data
-│       ├── 2014-2024_final.csv # Final data - in wide table form
-│       ├── final_time_series_2014_2019.csv # Time series data for 2014-2019
-│       ├── final_time_series_2020_2024.csv # Time series data for 2020-2024
+│       ├── 2024_final_time_series.csv # Final data - in wide table form for 2024
+│       ├── test_2025_final_time_series.csv # 2025 test data
 │       └── school_dic.csv      # School count data for each SCATS site
 ├── Transformer/                # Transformer model implementation
 │   ├── models/                 # Model architecture definitions
@@ -35,8 +35,22 @@ This project focuses on estimating travel time using traffic flow data with vari
 │   │   └── traffic_data_collector.py  # Data loading and preparation for Transformer
 │   ├── supervised_learning.py # Training script for Transformer model
 │   └── inference.py           # Script for making predictions with trained models
-├── LSTM/                       # LSTM model implementation (placeholder)
-├── GRU/                        # GRU model implementation (placeholder)
+├── LSTM/                       # LSTM model implementation 
+├── GRU/                        # GRU model implementation
+│   ├── data/                   # Data processing modules
+│   │   ├── data.py             # Main data processing functions
+│   │   ├── parse_data.py       # Data parsing utilities
+│   │   ├── train.csv           # Training dataset
+│   │   └── test.csv            # Testing dataset
+│   ├── images/                 # Architecture diagrams
+│   │   ├── GRU.png             # GRU model architecture diagram
+│   │   └── LSTM.png            # LSTM model architecture diagram
+│   ├── model/                  # Model definitions
+│   │   ├── model.py            # GRU and LSTM model implementations
+│   │   ├── gru.h5              # Saved GRU model
+│   │   └── lstm.h5             # Saved LSTM model
+│   ├── main.py                 # Main execution script for predictions
+│   └── train.py                # Training script for GRU and LSTM models
 └── Utils/                      # Utility scripts for data processing
     ├── feature_engineering.py  # Add features like school count, site type, day type
     ├── path_utilities.py       # Utilities for managing file paths
@@ -137,7 +151,7 @@ The project includes a comprehensive data preprocessing pipeline in the `Utils` 
 To train the Transformer model:
 
 ```bash
-python Transformer/supervised_learning.py --data_file Data/Transformed/final_time_series_2014_2019.csv
+python Transformer/supervised_learning.py --data_file Data/Transformed/2024_final_time_series.csv
 ```
 
 #### Training Parameters
@@ -145,7 +159,7 @@ python Transformer/supervised_learning.py --data_file Data/Transformed/final_tim
 You can customize the training process with various command-line arguments:
 
 ```bash
-python Transformer/supervised_learning.py --data_file Data/Transformed/final_time_series_2014_2019.csv --batch_size 64 --num_epochs 100 --learning_rate 0.0001
+python Transformer/supervised_learning.py --data_file Data/Transformed/2024_final_time_series.csv --batch_size 64 --num_epochs 100 --learning_rate 0.0001
 ```
 
 Key parameters:
@@ -168,7 +182,7 @@ python Transformer/supervised_learning.py --data_file Data/Transformed/_sample_f
 
 Train with a larger model for better performance:
 ```bash
-python Transformer/supervised_learning.py --data_file Data/Transformed/final_time_series_2014_2019.csv --d_model 128 --num_heads 8 --num_layers 4
+python Transformer/supervised_learning.py --data_file Data/Transformed/2024_final_time_series.csv --d_model 128 --num_heads 8 --num_layers 4
 ```
 
 The training script will:
@@ -182,7 +196,7 @@ The training script will:
 You can test a trained model's performance on test data:
 
 ```bash
-python Transformer/supervised_learning.py --data_file Data/Transformed/final_time_series_2020_2024.csv --test --model_path Transformer/save_models/transformer_traffic_model.pth
+python Transformer/supervised_learning.py --data_file Data/Transformed/2024_final_time_series.csv --test --model_path Transformer/save_models/transformer_traffic_model.pth
 ```
 
 #### Testing Parameters
@@ -261,6 +275,7 @@ The inference script will:
 - Pandas
 - Matplotlib
 - scikit-learn
+- warnings (for suppressing warnings)
 
 ## Contributors
 1. **Hong Anh Nguyen** - Data, Transformer
