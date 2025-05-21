@@ -97,11 +97,45 @@ def create_map(gdf, center=None):
         )
         circle_marker.add_to(marker_cluster)
     
-    # Add layer control
-    folium.LayerControl().add_to(m)
+    # Create a search control for the map
+    create_search(gdf, m)
         
     return m
 
+def create_search(gdf, map_obj):
+    """
+    Create a search control for the map to find traffic light locations by name
+    
+    Args:
+        gdf (geopandas.GeoDataFrame): GeoDataFrame containing locations with geometry
+        map_obj (folium.Map): The map object to add the search control to
+        
+    Returns:
+        None
+    """
+    # Create a search control for the map
+    scats = folium.GeoJson(
+        gdf,
+        name='Traffic Lights',
+        show=False,
+    ).add_to(map_obj)
+    
+    # Add search functionality
+    search = Search(
+        layer=scats,
+        geom_type='Point',
+        placeholder='Search by Site No or Name',
+        collapsed=True,
+        search_label='SITE_NO',
+        position='topright'
+    ).add_to(map_obj)
+    
+    # Add a layer control to toggle the visibility of the GeoJSON layer, Default is False
+    folium.LayerControl(
+        position='topright',
+        collapsed=True,
+    ).add_to(map_obj)
+    
 def main():
     """
     Main function to read data and create the map visualization
