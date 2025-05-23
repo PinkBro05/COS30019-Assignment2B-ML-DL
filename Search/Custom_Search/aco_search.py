@@ -5,16 +5,22 @@ import argparse
 import time
 import multiprocessing
 
+# Set up correct import paths
+current_dir = os.path.dirname(os.path.abspath(__file__))
 parent_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+# Add path to find aco_routing module
+sys.path.append(current_dir)
+
+# Add path to find data_reader module
 sys.path.append(parent_dir)
 
+# Import ACO modules
 from aco_routing.aco import ACO
 from aco_routing.network import Network
 
-current_dir = os.path.dirname(os.path.abspath(__file__))
-sys.path.append(os.path.join(current_dir, "..", "data_reader"))
-
-from parser import parse_graph_file
+# Import parser from data_reader
+from data_reader.parser import parse_graph_file
 
 def run_aco(graph_file_path, origin, destination, top_k=1):
     """
@@ -49,9 +55,9 @@ def run_aco(graph_file_path, origin, destination, top_k=1):
         node_count = G.number_of_nodes()
         use_floyd_warshall = False
         visualize = False
-        iterations = 20
+        iterations = 3
         ant_max_steps = node_count + 1
-        num_ants = node_count
+        num_ants = 100
         alpha = 1
         beta = 2
         evaporation_rate = 0.5

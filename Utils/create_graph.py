@@ -193,6 +193,33 @@ def create_graph_txt(scats_gdf, edge_distances, output_path):
             
     print(f"Graph file created with {len(scats_gdf)} nodes and {len(edge_distances)} edges")
 
+def filter_to_melbourne(gdf):
+    """
+    Filter the GeoDataFrame to include only traffic lights within Melbourne's bounding box
+    
+    Args:
+        gdf (geopandas.GeoDataFrame): GeoDataFrame with traffic light locations
+        
+    Returns:
+        geopandas.GeoDataFrame: Filtered GeoDataFrame
+    """
+    # Melbourne bounding box (approximate)
+    # Coordinates roughly cover Greater Melbourne area
+    min_lat = -38.00
+    max_lat = -37.50
+    min_lon = 144.50
+    max_lon = 145.50
+    
+    # Filter based on coordinates
+    melbourne_gdf = gdf[(gdf['latitude'] >= min_lat) & 
+                      (gdf['latitude'] <= max_lat) & 
+                      (gdf['longitude'] >= min_lon) & 
+                      (gdf['longitude'] <= max_lon)]
+    
+    print(f"Filtered from {len(gdf)} to {len(melbourne_gdf)} traffic lights within Melbourne area")
+    
+    return melbourne_gdf
+
 def main():
     """
     Main function to read data, create graph, and write to file
@@ -210,11 +237,14 @@ def main():
     if scats_gdf is None:
         return
     
+    # Filter to only Melbourne area
+    melbourne_gdf = filter_to_melbourne(scats_gdf)
+    
     # Create graph directly from SCATS sites
-    scats_graph, edge_distances = create_scats_graph(scats_gdf, max_distance_km=5)
+    scats_graph, edge_distances = create_scats_graph(melbourne_gdf, max_distance_km=0.5)
     
     # Create graph.txt
-    create_graph_txt(scats_gdf, edge_distances, output_path)
+    create_graph_txt(melbourne_gdf, edge_distances, output_path)
     
     end_time = time.time()
     print(f"Done! Execution time: {end_time - start_time:.2f} seconds")

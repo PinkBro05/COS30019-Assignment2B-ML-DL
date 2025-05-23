@@ -43,25 +43,51 @@ def read_geojson_file(geojson_file_path):
         print(f"Error reading GeoJSON file: {e}")
         sys.exit(1)
 
+def filter_to_melbourne(gdf):
+    """
+    Filter the GeoDataFrame to include only traffic lights within Melbourne's bounding box
+    
+    Args:
+        gdf (geopandas.GeoDataFrame): GeoDataFrame with traffic light locations
+        
+    Returns:
+        geopandas.GeoDataFrame: Filtered GeoDataFrame
+    """
+    # Melbourne bounding box (approximate)
+    # Coordinates roughly cover Greater Melbourne area
+    min_lat = -38.00
+    max_lat = -37.50
+    min_lon = 144.50
+    max_lon = 145.50
+    
+    # Filter based on coordinates
+    melbourne_gdf = gdf[(gdf['latitude'] >= min_lat) & 
+                      (gdf['latitude'] <= max_lat) & 
+                      (gdf['longitude'] >= min_lon) & 
+                      (gdf['longitude'] <= max_lon)]
+    
+    print(f"Filtered from {len(gdf)} to {len(melbourne_gdf)} traffic lights within Melbourne area")
+    
+    return melbourne_gdf
+
 def create_map(gdf, center=None):
     """
     Create an interactive map with markers for each traffic light location
     
     Args:
         gdf (geopandas.GeoDataFrame): GeoDataFrame containing locations with geometry
-        center (tuple, optional): Center coordinates for the map (lat, lon). If None, uses the mean of all points.
+        center (tuple, optional): Center coordinates for the map (lat, lon). If None, uses the center of Melbourne.
         
     Returns:
         folium.Map: The created map object
     """
     if center is None:
-        # Calculate the center as the mean of all points
-        center = [gdf['latitude'].mean(), gdf['longitude'].mean()]
-    
-    # Create a map with increased zoom capability
+        # Set center to CBD Melbourne
+        center = [-37.8136, 144.9631]  # Melbourne CBD coordinates
+      # Create a map centered on Melbourne with appropriate zoom
     m = folium.Map(
         location=center,
-        zoom_start=10,
+        zoom_start=12,  # Increased zoom level for Melbourne
         max_zoom=22,  # Increase maximum zoom level
         tiles='CartoDB positron',  # Use a minimal, faster loading tile layer
         control_scale=True  # Add scale for better navigation
@@ -153,13 +179,12 @@ class MainWindow(QMainWindow):
         
         # Initialize UI
         self.init_ui()
-        
-        # Current path groups on the map (for clearing later)
+          # Current path groups on the map (for clearing later)
         self.path_groups = []
         
     def init_ui(self):
         """Initialize the user interface"""
-        self.setWindowTitle("Traffic Light Locations with Path Search")
+        self.setWindowTitle("Melbourne Traffic Light Locations with Path Search")
         self.setGeometry(100, 100, 1280, 768)  # Larger window to accommodate search panel
         
         # Create main widget and layout
@@ -357,6 +382,9 @@ def main():
     
     # Read the GeoJSON file
     gdf = read_geojson_file(geojson_path)
+    
+    # Filter to Melbourne area
+    gdf = filter_to_melbourne(gdf)
     
     # Create the PyQt5 application
     app = QtWidgets.QApplication(sys.argv)
