@@ -1,9 +1,7 @@
-#!/usr/bin/env python3
-# -*- coding: utf-8 -*-
-
 """
 Script to plot traffic scats locations onto an interactive map.
 Uses GeoPy for geographical calculations and Folium for visualization.
+Includes search functionality to find paths between traffic light locations.
 """
 
 import os
@@ -12,8 +10,15 @@ import pandas as pd
 import geopandas as gpd
 import folium
 from folium.plugins import MarkerCluster, Search
-from PyQt5 import QtWidgets, QtCore
-from PyQt5.QtWebEngineWidgets import QWebEngineView
+from PyQt5 import QtWidgets, QtCore, QtWebEngineWidgets, QtGui
+from PyQt5.QtWidgets import QApplication, QMainWindow, QVBoxLayout, QHBoxLayout, QWidget, QLabel, QLineEdit, QPushButton, QComboBox, QGroupBox, QTableWidget, QTableWidgetItem, QHeaderView
+
+# Add Search module to path
+current_dir = os.path.dirname(os.path.abspath(__file__))
+sys.path.append(os.path.join(current_dir, "Search"))
+
+# Import search utilities
+from Search.search_utils import find_paths, highlight_path_on_map
 
 def read_geojson_file(geojson_file_path):
     """
@@ -140,11 +145,259 @@ def create_search(gdf, map_obj):
     # Add the layer to the map
     scats.add_to(scats_layer)
     scats_layer.add_to(map_obj)
+
+class MainWindow(QMainWindow):
+    """Main application window with map view and search panel"""
     
+    def __init__(self, gdf):
+        super().__init__()
+        
+        # Store the traffic light data
+        self.gdf = gdf
+        
+        # Initialize UI
+        self.init_ui()
+        
+        # Current path groups on the map (for clearing later)
+        self.path_groups = []
+        
+    def init_ui(self):
+        """Initialize the user interface"""
+        self.setWindowTitle("Traffic Light Locations with Path Search")
+        self.setGeometry(100, 100, 1280, 768)  # Larger window to accommodate search panel
+        
+        # Create main widget and layout
+        main_widget = QWidget()
+        main_layout = QHBoxLayout()
+        main_widget.setLayout(main_layout)
+        
+        # Create and configure the map widget
+        self.map_widget = QtWebEngineWidgets.QWebEngineView()
+        
+        # Create search panel
+        search_panel = self.create_search_panel()
+        
+        # Add widgets to main layout
+        main_layout.addWidget(search_panel, 1)
+        main_layout.addWidget(self.map_widget, 3)
+        
+        # Generate and load the map
+        self.map_obj = create_map(self.gdf)
+        output_file = 'map_output.html'
+        self.map_obj.save(output_file)
+        self.map_widget.load(QtCore.QUrl.fromLocalFile(os.path.abspath(output_file)))
+        
+        self.setCentralWidget(main_widget)
+        
+    def create_search_panel(self):
+        """Create the search panel for path finding"""
+        panel = QWidget()
+        layout = QVBoxLayout()
+        
+        # Create input group box
+        input_group = QGroupBox("Search for Paths")
+        input_layout = QVBoxLayout()
+        
+        # Origin input
+        origin_layout = QHBoxLayout()
+        origin_label = QLabel("Origin (SITE_NO):")
+        self.origin_input = QLineEdit()
+        origin_layout.addWidget(origin_label)
+        origin_layout.addWidget(self.origin_input)
+        
+        # Destination input
+        dest_layout = QHBoxLayout()
+        dest_label = QLabel("Destination (SITE_NO):")
+        self.dest_input = QLineEdit()
+        dest_layout.addWidget(dest_label)
+        dest_layout.addWidget(self.dest_input)
+        
+        # Algorithm selection
+        algo_layout = QHBoxLayout()
+        algo_label = QLabel("Algorithm:")
+        self.algo_combo = QComboBox()
+        self.algo_combo.addItems([
+            "A* Search (AS)", 
+            "Greedy Best-First Search (GBFS)", 
+            "Breadth-First Search (BFS)", 
+            "Depth-First Search (DFS)", 
+            "Dijkstra's Algorithm (CUS1)", 
+            "Ant Colony Optimization (CUS2)"
+        ])
+        algo_layout.addWidget(algo_label)
+        algo_layout.addWidget(self.algo_combo)
+        
+        # Search button
+        search_button = QPushButton("Find Paths")
+        search_button.clicked.connect(self.find_paths)
+        
+        # Add components to input layout
+        input_layout.addLayout(origin_layout)
+        input_layout.addLayout(dest_layout)
+        input_layout.addLayout(algo_layout)
+        input_layout.addWidget(search_button)
+        
+        # Set input group layout
+        input_group.setLayout(input_layout)
+        
+        # Create results table
+        results_group = QGroupBox("Search Results")
+        results_layout = QVBoxLayout()
+        
+        self.results_table = QTableWidget(0, 3)
+        self.results_table.setHorizontalHeaderLabels(["Path", "Cost (meters)", "Show"])
+        self.results_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.Stretch)
+        self.results_table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeToContents)
+        self.results_table.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeToContents)
+        
+        results_layout.addWidget(self.results_table)
+        results_group.setLayout(results_layout)
+        
+        # Add components to main panel layout
+        layout.addWidget(input_group)
+        layout.addWidget(results_group)
+        layout.addStretch(1)
+        
+        panel.setLayout(layout)
+        return panel
     
+    def find_paths(self):
+        """Find paths between origin and destination"""
+        # Get inputs
+        origin = self.origin_input.text().strip()
+        destination = self.dest_input.text().strip()
+        
+        # Basic validation
+        if not origin or not destination:
+            QtWidgets.QMessageBox.warning(
+                self, "Input Error", 
+                "Please enter both Origin and Destination SITE_NO values."
+            )
+            return
+            
+        # Validate origin and destination are valid SITE_NO values
+        site_nos = set(self.gdf['SITE_NO'].astype(str))
+        if origin not in site_nos:
+            QtWidgets.QMessageBox.warning(
+                self, "Input Error", 
+                f"Origin '{origin}' is not a valid SITE_NO."
+            )
+            return
+            
+        if destination not in site_nos:
+            QtWidgets.QMessageBox.warning(
+                self, "Input Error", 
+                f"Destination '{destination}' is not a valid SITE_NO."
+            )
+            return
+            
+        # Get selected algorithm code
+        algo_text = self.algo_combo.currentText()
+        if "AS" in algo_text:
+            algorithm = "AS"
+        elif "GBFS" in algo_text:
+            algorithm = "GBFS"
+        elif "BFS" in algo_text:
+            algorithm = "BFS"
+        elif "DFS" in algo_text:
+            algorithm = "DFS"
+        elif "CUS1" in algo_text:
+            algorithm = "CUS1"
+        else:
+            algorithm = "CUS2"
+            
+        # Show loading message
+        self.statusBar().showMessage(f"Finding paths with {algorithm}...")
+        QtWidgets.QApplication.processEvents()
+        
+        try:
+            # Find paths using search algorithms
+            graph_file_path = os.path.join('Data', 'graph.txt')
+            paths = find_paths(graph_file_path, origin, destination, algorithm, top_n=5)
+            
+            # Display results in the table
+            self.display_results(paths)
+            
+            # Update status
+            self.statusBar().showMessage(f"Found {len(paths)} paths.")
+        except Exception as e:
+            QtWidgets.QMessageBox.critical(
+                self, "Search Error", 
+                f"An error occurred while searching for paths: {str(e)}"
+            )
+            self.statusBar().showMessage("Search failed.")
+    
+    def display_results(self, paths):
+        """Display search results in the table"""
+        # Clear previous results
+        self.results_table.setRowCount(0)
+        
+        # Add new results
+        for i, (path, cost) in enumerate(paths):
+            self.results_table.insertRow(i)
+            
+            # Path
+            path_str = " → ".join(path)
+            self.results_table.setItem(i, 0, QTableWidgetItem(path_str))
+            
+            # Cost
+            cost_item = QTableWidgetItem(str(int(cost)))
+            cost_item.setTextAlignment(QtCore.Qt.AlignRight | QtCore.Qt.AlignVCenter)
+            self.results_table.setItem(i, 1, cost_item)
+            
+            # Show button
+            show_button = QPushButton("Show on Map")
+            show_button.clicked.connect(lambda checked, p=path, c=cost: self.show_path_on_map(p))
+            self.results_table.setCellWidget(i, 2, show_button)
+    
+    def show_path_on_map(self, path):
+        """Show the selected path on the map"""
+        # Clear previous paths
+        self.clear_paths()
+        
+        # Parse the graph file to get node positions
+        graph_file_path = os.path.join('Data', 'graph.txt')
+        
+        # Import parser directly here for simplicity
+        sys.path.append(os.path.join(current_dir, "Search", "data_reader"))
+        from Search.data_reader.parser import parse_graph_file
+        
+        # Get node positions and edges from graph file
+        nodes, edges, _, _ = parse_graph_file(graph_file_path)
+        
+        # Highlight the path on the map
+        colors = ['red', 'blue', 'green', 'purple', 'orange']
+        path_group = highlight_path_on_map(
+            self.map_obj, 
+            path, 
+            nodes, 
+            edges,
+            color=colors[len(self.path_groups) % len(colors)]
+        )
+        
+        self.path_groups.append(path_group)
+        
+        # Regenerate and reload the map
+        output_file = 'map_output.html'
+        self.map_obj.save(output_file)
+        self.map_widget.load(QtCore.QUrl.fromLocalFile(os.path.abspath(output_file)))
+        
+        # Zoom to path bounds
+        # (This is handled by the map automatically since paths are visible)
+    
+    def clear_paths(self):
+        """Clear all paths from the map"""
+        # Remove path groups from the map
+        for group in self.path_groups:
+            for layer in list(group._children.values()):
+                group._children.pop(layer.get_name())
+        
+        # Clear the list
+        self.path_groups.clear()
+
 def main():
     """
-    Main function to read data and create the map visualization
+    Main function to read data and create the map visualization with search functionality
     """
     # Path to the GeoJSON file
     geojson_path = os.path.join('Data', 'Traffic_Lights.geojson')
@@ -152,31 +405,15 @@ def main():
     # Read the GeoJSON file
     gdf = read_geojson_file(geojson_path)
     
-    # Create the map
-    m = create_map(gdf)
-    
-    # Display statistics
-    print(f"Total traffic light locations: {len(gdf)}")
-    
-    # Save map to HTML file
-    output_file = 'map_output.html'
-    m.save(output_file)
-    print(f"Map saved to {output_file}")
-
-    # Create a PyQt5 application to display the map
+    # Create the PyQt5 application
     app = QtWidgets.QApplication(sys.argv)
     
-    # Create a QWebEngineView instance
-    view = QWebEngineView()
-    view.setWindowTitle("Traffic Light Locations")
-    view.setGeometry(100, 100, 1024, 768)  # Slightly larger window for better visibility
+    # Create the main window
+    main_window = MainWindow(gdf)
+    main_window.show()
     
-    # Load the HTML file
-    view.load(QtCore.QUrl.fromLocalFile(os.path.abspath(output_file)))
-    view.show()
-    
+    # Run the application
     sys.exit(app.exec_())
-    
-    
+
 if __name__ == "__main__":
     main()
