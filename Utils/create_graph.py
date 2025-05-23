@@ -18,6 +18,9 @@ import time
 from tqdm import tqdm
 import matplotlib.pyplot as plt
 
+# Import the component connection utility
+from connect_components import connect_components
+
 def read_geojson_file(geojson_file_path):
     """
     Read the GeoJSON file containing traffic light data with coordinates
@@ -241,7 +244,24 @@ def main():
     melbourne_gdf = filter_to_melbourne(scats_gdf)
     
     # Create graph directly from SCATS sites
-    scats_graph, edge_distances = create_scats_graph(melbourne_gdf, max_distance_km=0.5)
+    scats_graph, edge_distances = create_scats_graph(melbourne_gdf, max_distance_km=1.5)
+    
+    # Connect disconnected components if needed
+    if not nx.is_connected(scats_graph):
+        print("Connecting disconnected components...")
+        scats_graph, edge_distances = connect_components(
+            scats_graph, edge_distances, max_fallback_distance=5, force_connect=True)
+    
+    # After connecting components
+    components = list(nx.connected_components(scats_graph))
+    if len(components) > 1:
+        print(f"WARNING: Graph still has {len(components)} disconnected components after connection attempt")
+        for i, component in enumerate(components):
+            print(f"Component {i} has {len(component)} nodes")
+        # This should never happen with force_connect=True
+        raise Exception("Failed to fully connect the graph despite all connection strategies")
+    else:
+        print("SUCCESS: Graph is fully connected with a single component of size", len(components[0]))
     
     # Create graph.txt
     create_graph_txt(melbourne_gdf, edge_distances, output_path)

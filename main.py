@@ -11,10 +11,12 @@ import geopandas as gpd
 import folium
 from folium.plugins import MarkerCluster, Search
 from PyQt5 import QtWidgets, QtCore, QtWebEngineWidgets
-from PyQt5.QtWidgets import  QMainWindow, QVBoxLayout, QHBoxLayout, QWidget, QLabel, QLineEdit, QPushButton, QComboBox, QGroupBox, QTableWidget, QTableWidgetItem, QHeaderView
+from PyQt5.QtWidgets import  QMainWindow, QVBoxLayout, QHBoxLayout, QWidget, QLabel, QLineEdit, QPushButton, QComboBox, QGroupBox, QTableWidget, QTableWidgetItem, QHeaderView, QCheckBox, QSlider
 
 # Import search utilities
 from Search.search_utils import find_paths
+# Import chunking utility
+from Utils.filter_chunk import create_chunked_graph, write_chunked_graph_to_file
 
 def read_geojson_file(geojson_file_path):
     """
@@ -179,8 +181,6 @@ class MainWindow(QMainWindow):
         
         # Initialize UI
         self.init_ui()
-          # Current path groups on the map (for clearing later)
-        self.path_groups = []
         
     def init_ui(self):
         """Initialize the user interface"""
@@ -328,18 +328,43 @@ class MainWindow(QMainWindow):
             
         # Show loading message
         self.statusBar().showMessage(f"Finding paths with {algorithm}...")
-        QtWidgets.QApplication.processEvents()
+        QtWidgets.QApplication.processEvents()        
         
         try:
-            # Find paths using search algorithms
+            # Original graph file path
             graph_file_path = os.path.join('Data', 'graph.txt')
-            paths = find_paths(graph_file_path, origin, destination, algorithm, top_k=5)
+            
+            # Use chunking to reduce search space
+            self.statusBar().showMessage(f"Applying chunking to reduce search space...")
+            QtWidgets.QApplication.processEvents()
+            
+            try:
+                # Apply chunking to create filtered graph
+                filtered_nodes, filtered_edges, chunked_origin, chunked_destinations = create_chunked_graph(
+                    graph_file_path, origin, destination, margin_factor=0.5
+                )
+                
+                # Create temporary chunked graph file
+                temp_graph_path = os.path.join('Data', 'temp_chunked_graph.txt')
+                write_chunked_graph_to_file(
+                    filtered_nodes, filtered_edges, chunked_origin, chunked_destinations, temp_graph_path
+                )
+                
+                # Find paths using the chunked graph
+                self.statusBar().showMessage(f"Finding paths with {algorithm} on reduced graph...")
+                QtWidgets.QApplication.processEvents()
+                paths = find_paths(temp_graph_path, origin, destination, algorithm, top_k=5)
+            except Exception as chunk_error:
+                # Fallback to original graph if chunking fails
+                self.statusBar().showMessage(f"Chunking failed, using full graph: {str(chunk_error)}")
+                QtWidgets.QApplication.processEvents()
+                paths = find_paths(graph_file_path, origin, destination, algorithm, top_k=5)
             
             # Display results in the table
             self.display_results(paths)
             
             # Update status
-            self.statusBar().showMessage(f"Found {len(paths)} paths.")
+            self.statusBar().showMessage(f"Found {len(paths)} paths using {algorithm}.")
         except Exception as e:
             QtWidgets.QMessageBox.critical(
                 self, "Search Error", 
@@ -364,13 +389,13 @@ class MainWindow(QMainWindow):
             cost_item = QTableWidgetItem(str(int(cost)))
             cost_item.setTextAlignment(QtCore.Qt.AlignRight | QtCore.Qt.AlignVCenter)
             self.results_table.setItem(i, 1, cost_item)
-            
             # Show button
             show_button = QPushButton("Show on Map")
             show_button.clicked.connect(lambda checked, p=path, c=cost: self.show_path_on_map(p))
             self.results_table.setCellWidget(i, 2, show_button)
-            
+    
     def show_path_on_map(self, path):
+        # TODO Implement the logic to highlight the path on the map and zoom in on it, fixing bug for AS and GBFS
         pass
 
 def main():
