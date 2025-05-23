@@ -3,16 +3,13 @@ Helper functions for using search algorithms from GUI applications.
 """
 import os
 import sys
-import importlib.util
 
 # Add the necessary paths for imports
 current_dir = os.path.dirname(os.path.abspath(__file__))
 sys.path.append(current_dir)
-sys.path.append(os.path.join(current_dir, "data_reader"))
-sys.path.append(os.path.join(current_dir, "Custom_Search"))
-sys.path.append(os.path.join(current_dir, "Custom_Search", "aco_routing"))
 
-from parser import parse_graph_file
+# Import modules using the new package structure
+from .data_reader import parse_graph_file
 
 def find_paths(graph_file_path, origin, destination, algorithm="AS", top_k=5):
     """
@@ -32,11 +29,10 @@ def find_paths(graph_file_path, origin, destination, algorithm="AS", top_k=5):
     """
     # Normalize the algorithm name
     algorithm = algorithm.upper()
-    
     if algorithm == "DIJK" or algorithm == "DIJKSTRA":
         # Use Dijkstra's algorithm
         try:
-            from Custom_Search.Dijkstras_Algorithm.dijk import run_dijkstra
+            from .Custom_Search.Dijkstras_Algorithm import run_dijkstra
             return run_dijkstra(graph_file_path, origin, destination, top_k)
         except Exception as e:
             print(f"Error running Dijkstra's algorithm: {e}")
@@ -45,10 +41,46 @@ def find_paths(graph_file_path, origin, destination, algorithm="AS", top_k=5):
     elif algorithm == "ACO":
         # Use ACO algorithm
         try:
-            from Custom_Search.aco_search import run_aco
+            from .Custom_Search import run_aco
             return run_aco(graph_file_path, origin, destination, top_k)
         except Exception as e:
             print(f"Error running ACO algorithm: {e}")
+            return []
+        
+    elif algorithm == "BFS":
+        # Use BFS algorithm
+        try:
+            from .Uninformed_Search import run_bfs
+            return run_bfs(graph_file_path, origin, destination, top_k)
+        except Exception as e:
+            print(f"Error running BFS algorithm: {e}")
+            return []
+            
+    elif algorithm == "DFS":
+        # Use DFS algorithm
+        try:
+            from .Uninformed_Search import run_dfs
+            return run_dfs(graph_file_path, origin, destination, top_k)
+        except Exception as e:
+            print(f"Error running DFS algorithm: {e}")
+            return []
+            
+    elif algorithm == "ASTAR" or algorithm == "A*":
+        # Use A* algorithm
+        try:
+            from .Informed_Search import run_astar
+            return run_astar(graph_file_path, origin, destination, top_k)
+        except Exception as e:
+            print(f"Error running A* algorithm: {e}")
+            return []
+            
+    elif algorithm == "GBFS":
+        # Use GBFS algorithm
+        try:
+            from .Informed_Search import run_gbfs
+            return run_gbfs(graph_file_path, origin, destination, top_k)
+        except Exception as e:
+            print(f"Error running GBFS algorithm: {e}")
             return []
     
     else:  # Default to Dijkstra for all other algorithms
