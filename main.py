@@ -290,8 +290,7 @@ class MainWindow(QMainWindow):
                 f"Destination '{destination}' is not a valid SITE_NO."
             )
             return
-            
-        # Get selected algorithm code
+              # Get selected algorithm code
         algo_text = self.algo_combo.currentText()
         if "AS" in algo_text:
             algorithm = "AS"
@@ -302,9 +301,9 @@ class MainWindow(QMainWindow):
         elif "DFS" in algo_text:
             algorithm = "DFS"
         elif "CUS1" in algo_text:
-            algorithm = "CUS1"
+            algorithm = "DIJK"  # Map to Dijkstra's algorithm code in search_utils.py
         else:
-            algorithm = "CUS2"
+            algorithm = "ACO"   # Map to ACO algorithm code in search_utils.py
             
         # Show loading message
         self.statusBar().showMessage(f"Finding paths with {algorithm}...")
@@ -313,7 +312,7 @@ class MainWindow(QMainWindow):
         try:
             # Find paths using search algorithms
             graph_file_path = os.path.join('Data', 'graph.txt')
-            paths = find_paths(graph_file_path, origin, destination, algorithm, top_n=5)
+            paths = find_paths(graph_file_path, origin, destination, algorithm, top_k=5)
             
             # Display results in the table
             self.display_results(paths)
@@ -349,7 +348,7 @@ class MainWindow(QMainWindow):
             show_button = QPushButton("Show on Map")
             show_button.clicked.connect(lambda checked, p=path, c=cost: self.show_path_on_map(p))
             self.results_table.setCellWidget(i, 2, show_button)
-    
+            
     def show_path_on_map(self, path):
         """Show the selected path on the map"""
         # Clear previous paths
@@ -362,28 +361,57 @@ class MainWindow(QMainWindow):
         sys.path.append(os.path.join(current_dir, "Search", "data_reader"))
         from Search.data_reader.parser import parse_graph_file
         
-        # Get node positions and edges from graph file
-        nodes, edges, _, _ = parse_graph_file(graph_file_path)
-        
-        # Highlight the path on the map
-        colors = ['red', 'blue', 'green', 'purple', 'orange']
-        path_group = highlight_path_on_map(
-            self.map_obj, 
-            path, 
-            nodes, 
-            edges,
-            color=colors[len(self.path_groups) % len(colors)]
-        )
-        
-        self.path_groups.append(path_group)
-        
-        # Regenerate and reload the map
-        output_file = 'map_output.html'
-        self.map_obj.save(output_file)
-        self.map_widget.load(QtCore.QUrl.fromLocalFile(os.path.abspath(output_file)))
-        
-        # Zoom to path bounds
-        # (This is handled by the map automatically since paths are visible)
+        try:
+            # Get node positions and edges from graph file
+            nodes, edges, _, _ = parse_graph_file(graph_file_path)
+            
+            # Debug: Print node types
+            print(f"Path node types: {[type(n) for n in path[:5]]}")
+            print(f"Graph node types: {[type(n) for n in list(nodes.keys())[:5]]}")
+            
+            # Convert all path nodes to strings to ensure type compatibility with graph nodes
+            path = [str(node) for node in path]
+              
+            # Check if all path nodes exist in the graph
+            missing_nodes = [node for node in path if node not in nodes]
+            if missing_nodes:
+                QtWidgets.QMessageBox.warning(
+                    self, "Display Error", 
+                    f"The following nodes in the path are not in the graph: {', '.join(missing_nodes)}. "
+                    f"The path may not display correctly.\n\n"
+                    f"This likely happens because the graph data is incomplete or inconsistent.\n"
+                    f"The sections of the path containing these nodes will be skipped."
+                )
+            
+            # Highlight the path on the map
+            colors = ['red', 'blue', 'green', 'purple', 'orange']
+            path_group = highlight_path_on_map(
+                self.map_obj, 
+                path, 
+                nodes, 
+                edges,
+                color=colors[len(self.path_groups) % len(colors)]
+            )
+            
+            # Add the path group to our list and to the map
+            self.path_groups.append(path_group)
+            
+            # Regenerate and reload the map
+            output_file = 'map_output.html'
+            self.map_obj.save(output_file)
+            self.map_widget.load(QtCore.QUrl.fromLocalFile(os.path.abspath(output_file)))
+            
+            # Update status
+            self.statusBar().showMessage("Path displayed successfully")
+            
+        except Exception as e:
+            QtWidgets.QMessageBox.critical(
+                self, "Display Error", 
+                f"An error occurred while displaying the path: {str(e)}"
+            )
+            self.statusBar().showMessage("Failed to display path")
+            import traceback
+            traceback.print_exc()
     
     def clear_paths(self):
         """Clear all paths from the map"""
