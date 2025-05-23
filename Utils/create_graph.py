@@ -211,7 +211,7 @@ def main():
         return
     
     # Create graph directly from SCATS sites
-    scats_graph, edge_distances = create_scats_graph(scats_gdf, max_distance_km=5)
+    scats_graph, edge_distances = create_scats_graph(scats_gdf, max_distance_km=1)
     
     # Create graph.txt
     create_graph_txt(scats_gdf, edge_distances, output_path)

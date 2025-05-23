@@ -19,11 +19,17 @@ def parse_graph_file(file_path, origin=None, destinations=None):
     nodes = {}
     edges = {}
     file_origin = None
-    file_destinations = []
+    file_destinations = []    # Add debug prints
+    print(f"Started parsing graph file: {file_path}")
     
     with open(file_path, 'r') as file:
         lines = file.readlines()
         section = None
+        
+        # Print a sample of the first few lines to debug
+        print(f"Sample lines from graph file:")
+        for i in range(min(5, len(lines))):
+            print(f"  Line {i}: {lines[i].strip()}")
         
         for line in lines:
             line = line.strip()
@@ -40,16 +46,16 @@ def parse_graph_file(file_path, origin=None, destinations=None):
             elif line.startswith("Destinations:"):
                 section = "destinations"
                 continue
-            
             if section == "nodes":
-                match = re.match(r"(\d+): \((\d+),(\d+)\)", line)
+                # Updated regex to handle floating-point coordinates
+                match = re.match(r"(\d+): \((-?\d+\.?\d*),(-?\d+\.?\d*)\)", line)
                 if match:
                     node_id = str(match.group(1))
-                    x, y = int(match.group(2)), int(match.group(3))
+                    x, y = float(match.group(2)), float(match.group(3))
                     nodes[node_id] = (x, y)
-            
             elif section == "edges":
-                match = re.match(r"\((\d+),(\d+)\): (\d+)", line)
+                # Updated regex to be more flexible with whitespace
+                match = re.match(r"\s*\((\d+),(\d+)\):\s*(\d+)", line)
                 if match:
                     node1, node2, weight = str(match.group(1)), str(match.group(2)), int(match.group(3))
                     edges[(node1, node2)] = weight
