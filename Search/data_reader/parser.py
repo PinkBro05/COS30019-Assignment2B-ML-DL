@@ -19,17 +19,11 @@ def parse_graph_file(file_path, origin=None, destinations=None):
     nodes = {}
     edges = {}
     file_origin = None
-    file_destinations = []    # Add debug prints
-    print(f"Started parsing graph file: {file_path}")
+    file_destinations = []
     
     with open(file_path, 'r') as file:
         lines = file.readlines()
         section = None
-        
-        # Print a sample of the first few lines to debug
-        print(f"Sample lines from graph file:")
-        for i in range(min(5, len(lines))):
-            print(f"  Line {i}: {lines[i].strip()}")
         
         for line in lines:
             line = line.strip()

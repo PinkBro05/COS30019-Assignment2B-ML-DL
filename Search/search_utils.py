@@ -13,7 +13,6 @@ sys.path.append(os.path.join(current_dir, "Custom_Search"))
 sys.path.append(os.path.join(current_dir, "Custom_Search", "aco_routing"))
 
 from parser import parse_graph_file
-from Custom_Search.aco_routing.network import Network
 
 def find_paths(graph_file_path, origin, destination, algorithm="AS", top_k=5):
     """

@@ -10,18 +10,11 @@ import pandas as pd
 import geopandas as gpd
 import folium
 from folium.plugins import MarkerCluster, Search
-from PyQt5 import QtWidgets, QtCore, QtWebEngineWidgets, QtGui
-from PyQt5.QtWidgets import QApplication, QMainWindow, QVBoxLayout, QHBoxLayout, QWidget, QLabel, QLineEdit, QPushButton, QComboBox, QGroupBox, QTableWidget, QTableWidgetItem, QHeaderView
-
-# Add Search module to path
-current_dir = os.path.dirname(os.path.abspath(__file__))
-sys.path.append(os.path.join(current_dir, "Search"))
-
-sys.path.append(os.path.join(current_dir, "Search", "data_reader"))
-from Search.data_reader.parser import parse_graph_file
+from PyQt5 import QtWidgets, QtCore, QtWebEngineWidgets
+from PyQt5.QtWidgets import  QMainWindow, QVBoxLayout, QHBoxLayout, QWidget, QLabel, QLineEdit, QPushButton, QComboBox, QGroupBox, QTableWidget, QTableWidgetItem, QHeaderView
 
 # Import search utilities
-from Search.search_utils import find_paths, highlight_path_on_map
+from Search.search_utils import find_paths
 
 def read_geojson_file(geojson_file_path):
     """
@@ -43,7 +36,7 @@ def read_geojson_file(geojson_file_path):
         gdf['latitude'] = gdf.geometry.y
         
         # Display first few rows to verify
-        print(gdf[['SITE_NO', 'SITE_NAME', 'SITE_TYPE', 'longitude', 'latitude']].head())
+        # print(gdf[['SITE_NO', 'SITE_NAME', 'SITE_TYPE', 'longitude', 'latitude']].head())
         
         return gdf
     except Exception as e:
@@ -351,6 +344,9 @@ class MainWindow(QMainWindow):
             show_button = QPushButton("Show on Map")
             show_button.clicked.connect(lambda checked, p=path, c=cost: self.show_path_on_map(p))
             self.results_table.setCellWidget(i, 2, show_button)
+            
+    def show_path_on_map(self, path):
+        pass
 
 def main():
     """
