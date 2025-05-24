@@ -17,7 +17,7 @@ def get_lstm(units):
     """
 
     model = Sequential()
-    model.add(LSTM(units[1], input_shape=(units[0], 1), return_sequences=True))
+    model.add(LSTM(units[1], input_shape=(units[0], 1), return_sequences=True)) # no. of hiddent units in LSTM layer, 
     model.add(LSTM(units[2]))
     model.add(Dropout(0.2))
     model.add(Dense(units[3], activation='sigmoid'))

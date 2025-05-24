@@ -93,11 +93,13 @@ def main(argv):
 
     if args.model == 'lstm':
         X_train = np.reshape(X_train, (X_train.shape[0], X_train.shape[1], 1))
+        # Model structure: [input_sequence_length, first_hidden, second_hidden, output_units]
         m = model.get_lstm([12, 64, 64, 1])
         train_model(m, X_train, y_train, args.model, config)
     if args.model == 'gru':
         X_train = np.reshape(X_train, (X_train.shape[0], X_train.shape[1], 1))
-        m = model.get_gru([12, 64, 64, 1])
+        # Model structure: [input_sequence_length, first_hidden, second_hidden, output_units]
+        m = model.get_gru([12, 64, 64, 1]) 
         train_model(m, X_train, y_train, args.model, config)
     if args.model == 'saes':
         X_train = np.reshape(X_train, (X_train.shape[0], X_train.shape[1]))

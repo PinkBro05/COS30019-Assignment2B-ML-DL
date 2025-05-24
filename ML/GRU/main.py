@@ -67,12 +67,12 @@ def plot_results(y_true, y_preds, names):
     Plot the true data and predicted data.
 
     # Arguments
-        y_true: List/ndarray, ture data.
+        y_true: List/ndarray, true data.
         y_pred: List/ndarray, predicted data.
         names: List, Method names.
     """
     d = '2016-3-4 00:00'
-    x = pd.date_range(d, periods=288, freq='5min')
+    x = pd.date_range(d, periods=288, freq='15min') # 
 
     fig = plt.figure()
     ax = fig.add_subplot(111)
@@ -91,19 +91,20 @@ def plot_results(y_true, y_preds, names):
     fig.autofmt_xdate()
 
     plt.show()
-
+    
 
 def main():
-    lstm = load_model('model/lstm.h5')
-    gru = load_model('model/gru.h5')
+    lstm = load_model('ML/GRU/model/lstm.h5')
+    gru = load_model('ML/GRU/model/gru.h5')
     models = [lstm, gru]
     names = ['LSTM', 'GRU']
 
     lag = 12
-    file1 = 'data/train.csv'
-    file2 = 'data/test.csv'
+    file1 = 'ML/GRU/data/train.csv'
+    file2 = 'ML/GRU/data/test.csv'
     _, _, X_test, y_test, scaler = process_data(file1, file2, lag)
     y_test = scaler.inverse_transform(y_test.reshape(-1, 1)).reshape(1, -1)[0]
+    print('y_test:', y_test[: 288])
 
     y_preds = []
     for name, model in zip(names, models):
@@ -111,7 +112,7 @@ def main():
             X_test = np.reshape(X_test, (X_test.shape[0], X_test.shape[1]))
         else:
             X_test = np.reshape(X_test, (X_test.shape[0], X_test.shape[1], 1))
-        file = 'images/' + name + '.png'
+        file = 'ML/GRU/images/' + name + '.png'
         plot_model(model, to_file=file, show_shapes=True)
         predicted = model.predict(X_test)
         predicted = scaler.inverse_transform(predicted.reshape(-1, 1)).reshape(1, -1)[0]
