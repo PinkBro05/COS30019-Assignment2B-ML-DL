@@ -79,7 +79,6 @@ The system includes three deep learning models for traffic flow prediction:
 
 1. **Transformer Model** (Primary)
    - Attention-based architecture for sequence prediction
-   - Best performance for traffic time series
    
 2. **LSTM Model**
    - Long Short-Term Memory for temporal patterns

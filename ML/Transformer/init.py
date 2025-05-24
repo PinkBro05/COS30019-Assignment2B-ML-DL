@@ -162,7 +162,8 @@ class TrafficFlowPredictor:
         return {
             'X': X,
             'site_id': site_id,
-            'features': features,            'flow_scaler': self.data_collector.flow_scaler
+            'features': features,            
+            'flow_scaler': self.data_collector.flow_scaler
         }
 
     def _fit_encoders_if_needed(self, df: pd.DataFrame) -> None:
