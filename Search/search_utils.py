@@ -82,12 +82,3 @@ def find_paths(graph_file_path, origin, destination, algorithm="AS", top_k=5):
         except Exception as e:
             print(f"Error running GBFS algorithm: {e}")
             return []
-        
-    else:  # Default to Dijkstra for all other algorithms
-        try:
-            from .Custom_Search import run_dijkstra
-            print(f"Algorithm {algorithm} not fully implemented, falling back to Dijkstra's algorithm")
-            return run_dijkstra(graph_file_path, origin, destination, top_k)
-        except Exception as e:
-            print(f"Error running fallback algorithm: {e}")
-            return []

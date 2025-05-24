@@ -133,6 +133,9 @@ def create_map(gdf, center=None):
     # Create a search control for the map
     create_search(gdf, m)
 
+    # Add geocoder
+    folium.plugins.Geocoder().add_to(m)
+
     # Add a layer control to toggle the visibility
     folium.LayerControl(
         position='topright',
@@ -432,15 +435,30 @@ class MainWindow(QMainWindow):
                 f"An error occurred while searching for paths: {str(e)}"
             )
             self.statusBar().showMessage("Search failed.")
-    
     def display_results(self, paths):
         """Display search results in the table"""
         # Clear previous results
         self.results_table.setRowCount(0)
         
-        # Update table headers based on cost type
-        cost_header = getattr(self, 'current_cost_type', 'Cost (meters)')
-        self.results_table.setHorizontalHeaderLabels(["Path", cost_header, "Show"])
+        # Determine if we need to show both time and distance
+        is_time_based = hasattr(self, 'current_cost_type') and 'time' in self.current_cost_type
+        
+        # Update columns based on cost type
+        if is_time_based:
+            # Show both time and distance columns when using traffic prediction
+            self.results_table.setColumnCount(4)
+            self.results_table.setHorizontalHeaderLabels(["Path", "Time", "Distance (m)", "Show"])
+            self.results_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.Stretch)
+            self.results_table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeToContents)
+            self.results_table.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeToContents)
+            self.results_table.horizontalHeader().setSectionResizeMode(3, QHeaderView.ResizeToContents)
+        else:
+            # Use original 3-column layout for distance-only results
+            self.results_table.setColumnCount(3)
+            self.results_table.setHorizontalHeaderLabels(["Path", "Distance (m)", "Show"])
+            self.results_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.Stretch)
+            self.results_table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeToContents)
+            self.results_table.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeToContents)
         
         # Add new results
         for i, (path, cost) in enumerate(paths):
@@ -450,21 +468,61 @@ class MainWindow(QMainWindow):
             path_str = " → ".join(path)
             self.results_table.setItem(i, 0, QTableWidgetItem(path_str))
             
-            # Cost (format based on type)
-            if hasattr(self, 'current_cost_type') and 'time' in self.current_cost_type:
-                # Format time in seconds with 2 decimal places
-                cost_display = f"{cost:.2f}"
-            else:
-                # Format distance as integer
-                cost_display = str(int(cost))
+            # Calculate path distance if we're in time-based mode
+            # This is done by estimating from the path nodes using straight-line distances
+            path_distance = 0
+            if is_time_based and len(path) > 1:
+                for j in range(len(path) - 1):
+                    # Get coordinates for both points
+                    row1 = self.gdf[self.gdf['SITE_NO'].astype(str) == str(path[j])].iloc[0]
+                    row2 = self.gdf[self.gdf['SITE_NO'].astype(str) == str(path[j+1])].iloc[0]
+                    
+                    # Calculate Euclidean distance and convert to approximate meters
+                    lat1, lon1 = row1['latitude'], row1['longitude']
+                    lat2, lon2 = row2['latitude'], row2['longitude']
+                    
+                    # Simple haversine distance calculation (approximate)
+                    from math import radians, sin, cos, sqrt, atan2
+                    R = 6371000  # Earth radius in meters
+                    
+                    dLat = radians(lat2 - lat1)
+                    dLon = radians(lon2 - lon1)
+                    a = sin(dLat/2) * sin(dLat/2) + cos(radians(lat1)) * cos(radians(lat2)) * sin(dLon/2) * sin(dLon/2)
+                    c = 2 * atan2(sqrt(a), sqrt(1-a))
+                    distance = R * c
+                    
+                    path_distance += distance
             
-            cost_item = QTableWidgetItem(cost_display)
-            cost_item.setTextAlignment(QtCore.Qt.AlignRight | QtCore.Qt.AlignVCenter)
-            self.results_table.setItem(i, 1, cost_item)
-            # Show button
-            show_button = QPushButton("Show on Map")
-            show_button.clicked.connect(lambda checked, p=path, c=cost: self.show_path_on_map(p))
-            self.results_table.setCellWidget(i, 2, show_button)
+            if is_time_based:
+                # Format time in minutes and seconds
+                minutes = int(cost) // 60
+                seconds = int(cost) % 60
+                time_display = f"{minutes} min {seconds} sec"
+                
+                # Add time display
+                time_item = QTableWidgetItem(time_display)
+                time_item.setTextAlignment(QtCore.Qt.AlignRight | QtCore.Qt.AlignVCenter)
+                self.results_table.setItem(i, 1, time_item)
+                
+                # Add distance display
+                distance_item = QTableWidgetItem(f"{int(path_distance)}")
+                distance_item.setTextAlignment(QtCore.Qt.AlignRight | QtCore.Qt.AlignVCenter)
+                self.results_table.setItem(i, 2, distance_item)
+                
+                # Show button in column 3
+                show_button = QPushButton("Show on Map")
+                show_button.clicked.connect(lambda checked, p=path, c=cost: self.show_path_on_map(p))
+                self.results_table.setCellWidget(i, 3, show_button)
+            else:
+                # For distance-only mode, just show the distance in meters (column 1)
+                distance_item = QTableWidgetItem(f"{int(cost)}")
+                distance_item.setTextAlignment(QtCore.Qt.AlignRight | QtCore.Qt.AlignVCenter)
+                self.results_table.setItem(i, 1, distance_item)
+                
+                # Show button in column 2
+                show_button = QPushButton("Show on Map")
+                show_button.clicked.connect(lambda checked, p=path, c=cost: self.show_path_on_map(p))
+                self.results_table.setCellWidget(i, 2, show_button)
     
     def show_path_on_map(self, path):
         # Retrieve coordinates for each site in the path
