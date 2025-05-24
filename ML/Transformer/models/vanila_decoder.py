@@ -3,7 +3,7 @@ Decoder part of the transformer model.
 Contains self-attention, encoder-decoder attention, and feed forward modules.
 """
 import torch.nn as nn
-from Transformer.models.math import MultiHeadAttention, PositionWiseFeedForward
+from ML.Transformer.models.math import MultiHeadAttention, PositionWiseFeedForward
 
 class TransformerDecoderLayer(nn.Module):
     def __init__(self, d_model, nhead, dim_feedforward=2048, dropout=0.1):

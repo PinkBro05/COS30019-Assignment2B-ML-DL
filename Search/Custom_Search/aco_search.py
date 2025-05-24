@@ -53,9 +53,9 @@ def run_aco(graph_file_path, origin, destination, top_k=1):
 
         # Calculate adaptive parameters
         node_count = G.number_of_nodes()
-        use_floyd_warshall = False
+        use_floyd_warshall = True
         visualize = False
-        iterations = 3
+        iterations = 5
         ant_max_steps = node_count + 1
         num_ants = 100
         alpha = 1
@@ -64,7 +64,7 @@ def run_aco(graph_file_path, origin, destination, top_k=1):
         
         # Determine optimal parameters based on graph size
         use_local_search = True
-        local_search_frequency = 10  # Apply local search every 10 iterations
+        local_search_frequency = 3  # Apply local search every 10 iterations
         num_threads = min(multiprocessing.cpu_count(), 4)  # Use available CPU cores efficiently
         
         # Convert destination to list if it's a single node

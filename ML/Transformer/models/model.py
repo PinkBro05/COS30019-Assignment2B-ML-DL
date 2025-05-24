@@ -4,8 +4,8 @@ Transformer model definition for traffic flow prediction
 from torch import nn
 import torch
 import math
-from Transformer.models.vanila_encoder import TransformerEncoderLayer
-from Transformer.models.vanila_decoder import TransformerDecoderLayer
+from ML.Transformer.models.vanila_encoder import TransformerEncoderLayer
+from ML.Transformer.models.vanila_decoder import TransformerDecoderLayer
 
 # Sinusoid positional encoding
 class PositionalEncoding(nn.Module):

@@ -11,12 +11,16 @@ import geopandas as gpd
 import folium
 from folium.plugins import MarkerCluster, Search
 from PyQt5 import QtWidgets, QtCore, QtWebEngineWidgets
-from PyQt5.QtWidgets import  QMainWindow, QVBoxLayout, QHBoxLayout, QWidget, QLabel, QLineEdit, QPushButton, QComboBox, QGroupBox, QTableWidget, QTableWidgetItem, QHeaderView, QCheckBox, QSlider
+from PyQt5.QtWidgets import  QMainWindow, QVBoxLayout, QHBoxLayout, QWidget, QLabel, QLineEdit, QPushButton, QComboBox, QGroupBox, QTableWidget, QTableWidgetItem, QHeaderView, QCheckBox, QSlider, QDateTimeEdit
+from PyQt5.QtCore import QDateTime
+from datetime import datetime
 
 # Import search utilities
 from Search.search_utils import find_paths
 # Import chunking utility
 from Utils.filter_chunk import create_chunked_graph, write_chunked_graph_to_file
+# Import ML prediction module
+from ML.predict import get_traffic_predictions
 
 def read_geojson_file(geojson_file_path):
     """
@@ -233,6 +237,23 @@ class MainWindow(QMainWindow):
         dest_layout.addWidget(dest_label)
         dest_layout.addWidget(self.dest_input)
         
+        # Start time input for traffic prediction
+        time_layout = QHBoxLayout()
+        time_label = QLabel("Start Time:")
+        self.time_input = QDateTimeEdit()
+        self.time_input.setDateTime(QDateTime.currentDateTime())
+        self.time_input.setDisplayFormat("yyyy-MM-dd hh:mm:ss")
+        self.time_input.setCalendarPopup(True)
+        time_layout.addWidget(time_label)
+        time_layout.addWidget(self.time_input)
+        
+        # Use traffic prediction checkbox
+        traffic_layout = QHBoxLayout()
+        self.use_traffic_checkbox = QCheckBox("Use Traffic Flow Predictions")
+        self.use_traffic_checkbox.setChecked(False)
+        self.use_traffic_checkbox.setToolTip("Enable to use ML-predicted traffic flow for time-based costs")
+        traffic_layout.addWidget(self.use_traffic_checkbox)
+        
         # Algorithm selection
         algo_layout = QHBoxLayout()
         algo_label = QLabel("Algorithm:")
@@ -255,6 +276,8 @@ class MainWindow(QMainWindow):
         # Add components to input layout
         input_layout.addLayout(origin_layout)
         input_layout.addLayout(dest_layout)
+        input_layout.addLayout(time_layout)
+        input_layout.addLayout(traffic_layout)
         input_layout.addLayout(algo_layout)
         input_layout.addWidget(search_button)
         
@@ -287,6 +310,8 @@ class MainWindow(QMainWindow):
         # Get inputs
         origin = self.origin_input.text().strip()
         destination = self.dest_input.text().strip()
+        start_time = self.time_input.dateTime().toString("yyyy-MM-dd hh:mm:ss")
+        use_traffic = self.use_traffic_checkbox.isChecked()
         
         # Basic validation
         if not origin or not destination:
@@ -311,6 +336,29 @@ class MainWindow(QMainWindow):
                 f"Destination '{destination}' is not a valid SITE_NO."
             )
             return
+        
+        # If traffic prediction is enabled, get ML predictions
+        traffic_data = None
+        if use_traffic:
+            try:
+                print(f"Getting traffic predictions for time: {start_time}")
+                traffic_data = get_traffic_predictions(start_time, origin, destination)
+                if traffic_data['status'] == 'success':
+                    print(f"Successfully obtained traffic predictions for {len(traffic_data['time_costs'])} edges")
+                else:
+                    print(f"Traffic prediction failed: {traffic_data.get('error', 'Unknown error')}")
+                    QtWidgets.QMessageBox.warning(
+                        self, "Traffic Prediction Warning",
+                        f"Traffic prediction failed. Using distance-based costs.\nError: {traffic_data.get('error', 'Unknown error')}"
+                    )
+                    traffic_data = None
+            except Exception as e:
+                print(f"Error getting traffic predictions: {e}")
+                QtWidgets.QMessageBox.warning(
+                    self, "Traffic Prediction Error",
+                    f"Failed to get traffic predictions. Using distance-based costs.\nError: {str(e)}"
+                )
+                traffic_data = None
               # Get selected algorithm code
         algo_text = self.algo_combo.currentText()
         if "AS" in algo_text:
@@ -344,6 +392,12 @@ class MainWindow(QMainWindow):
                     graph_file_path, origin, destination, margin_factor=0.5
                 )
                 
+                # If traffic prediction is enabled, modify edge costs
+                if traffic_data and traffic_data['status'] == 'success':
+                    self.statusBar().showMessage(f"Applying traffic-based costs...")
+                    QtWidgets.QApplication.processEvents()
+                    filtered_edges = self._apply_traffic_costs(filtered_edges, traffic_data['time_costs'])
+                
                 # Create temporary chunked graph file
                 temp_graph_path = os.path.join('Data', 'temp_chunked_graph.txt')
                 write_chunked_graph_to_file(
@@ -351,14 +405,20 @@ class MainWindow(QMainWindow):
                 )
                 
                 # Find paths using the chunked graph
-                self.statusBar().showMessage(f"Finding paths with {algorithm} on reduced graph...")
+                cost_type = "time (seconds)" if traffic_data and traffic_data['status'] == 'success' else "distance (meters)"
+                self.statusBar().showMessage(f"Finding paths with {algorithm} using {cost_type}...")
                 QtWidgets.QApplication.processEvents()
                 paths = find_paths(temp_graph_path, origin, destination, algorithm, top_k=5)
+                
+                # Store cost type for display
+                self.current_cost_type = cost_type
+                
             except Exception as chunk_error:
                 # Fallback to original graph if chunking fails
                 self.statusBar().showMessage(f"Chunking failed, using full graph: {str(chunk_error)}")
                 QtWidgets.QApplication.processEvents()
                 paths = find_paths(graph_file_path, origin, destination, algorithm, top_k=5)
+                self.current_cost_type = "distance (meters)"
             
             # Display results in the table
             self.display_results(paths)
@@ -377,6 +437,10 @@ class MainWindow(QMainWindow):
         # Clear previous results
         self.results_table.setRowCount(0)
         
+        # Update table headers based on cost type
+        cost_header = getattr(self, 'current_cost_type', 'Cost (meters)')
+        self.results_table.setHorizontalHeaderLabels(["Path", cost_header, "Show"])
+        
         # Add new results
         for i, (path, cost) in enumerate(paths):
             self.results_table.insertRow(i)
@@ -385,8 +449,15 @@ class MainWindow(QMainWindow):
             path_str = " → ".join(path)
             self.results_table.setItem(i, 0, QTableWidgetItem(path_str))
             
-            # Cost
-            cost_item = QTableWidgetItem(str(int(cost)))
+            # Cost (format based on type)
+            if hasattr(self, 'current_cost_type') and 'time' in self.current_cost_type:
+                # Format time in seconds with 2 decimal places
+                cost_display = f"{cost:.2f}"
+            else:
+                # Format distance as integer
+                cost_display = str(int(cost))
+            
+            cost_item = QTableWidgetItem(cost_display)
             cost_item.setTextAlignment(QtCore.Qt.AlignRight | QtCore.Qt.AlignVCenter)
             self.results_table.setItem(i, 1, cost_item)
             # Show button
@@ -431,6 +502,36 @@ class MainWindow(QMainWindow):
         output_file = 'map_output.html'
         self.map_obj.save(output_file)
         self.map_widget.load(QtCore.QUrl.fromLocalFile(os.path.abspath(output_file)))
+
+    def _apply_traffic_costs(self, edges, traffic_costs):
+        """
+        Apply traffic-based time costs to graph edges.
+        
+        Args:
+            edges: Dictionary of graph edges
+            traffic_costs: Dictionary of time-based costs from ML prediction
+            
+        Returns:
+            Modified edges dictionary with updated costs
+        """
+        modified_edges = edges.copy()
+        applied_count = 0
+        
+        for edge_key, edge_data in modified_edges.items():
+            # Check if we have a time cost for this edge
+            if edge_key in traffic_costs:
+                # Update the cost/weight with time-based cost
+                original_cost = edge_data
+                time_cost = traffic_costs[edge_key]
+                
+                # Replace the edge cost with time cost
+                modified_edges[edge_key] = time_cost
+                applied_count += 1
+                
+                print(f"Updated edge {edge_key}: {original_cost} -> {time_cost}")
+        
+        print(f"Applied time-based costs to {applied_count} out of {len(edges)} edges")
+        return modified_edges
 
 def main():
     """

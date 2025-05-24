@@ -10,9 +10,9 @@ import argparse
 
 # Add parent directory to path to import from utils
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from Transformer.utils.traffic_data_collector import TrafficDataCollector
-from Transformer.models.model import TransformerModel
-from Transformer.utils.model_utils import save_model_metadata, load_model_metadata, load_model_with_embedding_fix
+from ML.Transformer.utils.traffic_data_collector import TrafficDataCollector
+from ML.Transformer.models.model import TransformerModel
+from ML.Transformer.utils.model_utils import save_model_metadata, load_model_metadata, load_model_with_embedding_fix
 
 def parse_args():
     """Parse command line arguments."""
