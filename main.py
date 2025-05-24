@@ -390,7 +390,7 @@ class MainWindow(QMainWindow):
             try:
                 # Apply chunking to create filtered graph
                 filtered_nodes, filtered_edges, chunked_origin, chunked_destinations = create_chunked_graph(
-                    graph_file_path, origin, destination, margin_factor=0.5
+                    graph_file_path, origin, destination, margin_factor=0.1
                 )
                 
                 # If traffic prediction is enabled, modify edge costs

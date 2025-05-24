@@ -8,253 +8,207 @@ import sys
 import torch
 import pandas as pd
 import numpy as np
+from typing import Dict, List, Optional, Union, Tuple, Any
+from datetime import datetime
 
 # Add parent directory to path to import from utils
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from ML.Transformer.utils.traffic_data_collector import TrafficDataCollector
 from ML.Transformer.models.model import TransformerModel
 
+# Constants
+DEFAULT_MODEL_NAME = '2024_4_steps_5_epochs_transformer_traffic_model.pth'
+DEFAULT_DATASET_NAME = '_sample_final_time_series.csv'
+DEFAULT_EMBEDDING_DIM = 16
+DEFAULT_SEQ_LEN = 24
+FALLBACK_SITE_ID = 100  # Site ID used when sample data only contains one site
+
+# Model configuration
+MODEL_CONFIG = {
+    'input_dim': 13,
+    'd_model': 64,
+    'num_heads': 8,
+    'num_layers': 3,
+    'd_ff': 256,
+    'dropout': 0.1,
+    'output_size': 1
+}
+
+# Feature columns in order (must match training order)
+FEATURE_COLUMNS = [
+    'day_of_week_sin', 'day_of_week_cos',  # Date features
+    'month_sin', 'month_cos',
+    'hour_sin', 'hour_cos',  # Time features
+    'minute_sin', 'minute_cos',
+    'NB_SCATS_SITE_encoded',  # Site ID
+    'scat_type_encoded',  # Scat type
+    'day_type_encoded',  # Day type
+    'school_count_scaled',  # Standardized school count
+    'Flow_scaled'  # Standardized flow (target)
+]
+
+# Categorical feature indices
+CATEGORICAL_INDICES = {
+    'NB_SCATS_SITE': FEATURE_COLUMNS.index('NB_SCATS_SITE_encoded'),
+    'day_type': FEATURE_COLUMNS.index('day_type_encoded')
+}
+
 class TrafficFlowPredictor:
-    def __init__(self, model_path=None, data_path=None, embedding_dim=16):
-        """
-        Initialize the traffic flow predictor.
-        
-        Args:
-            model_path: Path to the model file (default: use the latest model in save_models)
-            data_path: Path to the data directory (default: use the default path)
-            embedding_dim: Dimension for categorical embeddings (default: 16)
-        """
-        # Set default model path if not provided
-        if model_path is None:
-            model_path = os.path.join(
-                os.path.dirname(os.path.abspath(__file__)),
-                'save_models',
-                '2024_4_steps_5_epochs_transformer_traffic_model.pth'
-            )
-        
-        # Check if model file exists
-        if not os.path.exists(model_path):
-            raise FileNotFoundError(f"Model file not found at {model_path}")
-        
-        self.model_path = model_path
+    """Transformer-based traffic flow predictor."""
+    
+    def __init__(self, model_path: Optional[str] = None, data_path: Optional[str] = None, 
+                 embedding_dim: int = DEFAULT_EMBEDDING_DIM):
+        """Initialize the traffic flow predictor."""
+        self.model_path = model_path or self._get_default_model_path()
         self.embedding_dim = embedding_dim
-        
-        # Set device
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         
-        # Create data collector
+        # Validate model file exists
+        if not os.path.exists(self.model_path):
+            raise FileNotFoundError(f"Model file not found at {self.model_path}")
+        
+        # Initialize components
         self.data_collector = TrafficDataCollector(data_path, embedding_dim)
+        self.categorical_metadata, self.categorical_indices = self._extract_model_metadata()
+        self.model = None  # Lazy loading
         
-        # Load model metadata
-        self.categorical_metadata, self.categorical_indices = self._get_embedding_dimensions_from_model()
-        
-        # Prepare model parameters
-        self.model_params = {
-            'input_dim': 13,  # Default value, will be updated when loading data
-            'd_model': 64,
-            'num_heads': 8,
-            'num_layers': 3,
-            'd_ff': 256,
-            'dropout': 0.1,
-            'output_size': 1
-        }
-        
-        # Initialize model (will be loaded on first prediction)
-        self.model = None
+    def _get_default_model_path(self) -> str:
+        """Get the default model path."""
+        return os.path.join(os.path.dirname(os.path.abspath(__file__)), 'save_models', DEFAULT_MODEL_NAME)
     
-    def _get_embedding_dimensions_from_model(self):
-        """Extract embedding dimensions from the saved model file."""
-        # Load the model state dict
+    def _get_default_dataset_path(self) -> str:
+        """Get the default dataset path."""
+        base_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+        return os.path.join(base_dir, 'ML', 'Data', 'Transformed', DEFAULT_DATASET_NAME)
+    
+    def _extract_model_metadata(self) -> Tuple[Dict[str, Dict[str, int]], Dict[str, int]]:
+        """Extract embedding dimensions and categorical indices from saved model."""
         state_dict = torch.load(self.model_path, map_location=torch.device('cpu'))
         
-        # Extract embedding dimensions
         categorical_metadata = {}
-        categorical_indices = {}
-        
-        # Find all embedding layers in the state dict
         for key in state_dict.keys():
             if 'embedding_layers' in key and 'weight' in key:
-                # Extract feature name from key, format: embedding_layers.{feature_name}.weight
                 feature_name = key.split('.')[1]
-                
-                # Get weight shape
-                weight_shape = state_dict[key].shape
-                num_classes, embedding_dim = weight_shape
-                
-                # Store metadata
+                num_classes, embedding_dim = state_dict[key].shape
                 categorical_metadata[feature_name] = {
                     'num_classes': num_classes,
                     'embedding_dim': embedding_dim
                 }
-        
-        # Define feature order
-        feature_cols = [
-            'day_of_week_sin', 'day_of_week_cos',  # Date features
-            'month_sin', 'month_cos',
-            'hour_sin', 'hour_cos',  # Time features
-            'minute_sin', 'minute_cos',
-            'NB_SCATS_SITE_encoded',  # Site ID
-            'scat_type_encoded',  # Scat type
-            'day_type_encoded',  # Day type
-            'school_count_scaled',  # Standardized school count
-            'Flow_scaled'  # Standardized flow (target)
-        ]
-        
-        # Define categorical feature indices
-        categorical_indices = {
-            'NB_SCATS_SITE': feature_cols.index('NB_SCATS_SITE_encoded'),
-            'day_type': feature_cols.index('day_type_encoded')
-        }
-        
-        return categorical_metadata, categorical_indices
-    
-    def load_model(self):
+        return categorical_metadata, CATEGORICAL_INDICES
+
+    def load_model(self) -> TransformerModel:
         """Load the trained model."""
-        # Create model with dimensions from the saved model
+        if self.model is not None:
+            return self.model
+            
         self.model = TransformerModel(
-            input_dim=self.model_params['input_dim'],
-            d_model=self.model_params['d_model'],
-            num_heads=self.model_params['num_heads'],
-            d_ff=self.model_params['d_ff'],
-            output_size=self.model_params['output_size'],
-            num_layers=self.model_params['num_layers'],
-            dropout=self.model_params['dropout'],
             categorical_metadata=self.categorical_metadata,
-            categorical_indices=self.categorical_indices
+            categorical_indices=self.categorical_indices,
+            **MODEL_CONFIG
         )
         
-        # Load the saved state dict
         self.model.load_state_dict(torch.load(self.model_path, map_location=self.device))
         self.model.eval()
         self.model.to(self.device)
-        
         return self.model
-    
-    def prepare_data_for_inference(self, df, site_id, timestamp, seq_len=24):
-        """
-        Prepare data for inference.
-        
-        Args:
-            df: DataFrame with historical traffic data
-            site_id: SCATS site ID to predict for
-            timestamp: Datetime to predict for
-            seq_len: Number of time steps to use as input (default: 24)
-            
-        Returns:
-            Dictionary with processed data for inference
-        """
-        # Filter data for the specific site
+
+    def _process_site_data(self, df: pd.DataFrame, site_id: Union[str, int], 
+                          timestamp: Union[str, datetime], seq_len: int) -> pd.DataFrame:
+        """Process and filter site data for the given timestamp."""
         site_df = df[df['NB_SCATS_SITE'] == site_id].copy()
-        
         if len(site_df) == 0:
             raise ValueError(f"No data found for site {site_id}")
         
-        # Sort by datetime to ensure correct sequence
+        # Prepare datetime and filter historical data
         site_df['datetime'] = pd.to_datetime(site_df['date'] + ' ' + site_df['time'])
         site_df = site_df.sort_values('datetime')
         
-        # Get the timestamp as datetime
-        if isinstance(timestamp, str):
-            pred_datetime = pd.to_datetime(timestamp)
-        else:
-            pred_datetime = timestamp
-            
-        # Find data before the prediction time
+        pred_datetime = pd.to_datetime(timestamp) if isinstance(timestamp, str) else timestamp
         historical_df = site_df[site_df['datetime'] < pred_datetime].copy()
         
         if len(historical_df) < seq_len:
             raise ValueError(f"Not enough historical data for site {site_id}. Need at least {seq_len} time steps.")
         
-        # Take the most recent seq_len time steps
-        historical_df = historical_df.iloc[-seq_len:].reset_index(drop=True)
+        return historical_df.iloc[-seq_len:].reset_index(drop=True)
+
+    def _apply_transformations(self, df: pd.DataFrame) -> pd.DataFrame:
+        """Apply all data transformations (cyclical features, encoding, scaling)."""
+        df_processed = self.data_collector._create_cyclical_features(df)
         
-        # Create cyclical features
-        df_processed = self.data_collector._create_cyclical_features(historical_df)
-        
-        # Process categorical features
-        df_processed['NB_SCATS_SITE_encoded'] = self.data_collector.site_encoder.transform(df_processed['NB_SCATS_SITE'])
-        df_processed['scat_type_encoded'] = self.data_collector.scat_type_encoder.transform(df_processed['scat_type'])
-        df_processed['day_type_encoded'] = self.data_collector.day_type_encoder.transform(df_processed['day_type'])
-        
-        # Standardize numerical features
-        df_processed['school_count_scaled'] = self.data_collector.school_count_scaler.transform(df_processed[['school_count']])
-        df_processed['Flow_scaled'] = self.data_collector.flow_scaler.transform(df_processed[['Flow']])
-        
-        # Create feature columns list (must match the order in training)
-        feature_cols = [
-            'day_of_week_sin', 'day_of_week_cos',  # Date features
-            'month_sin', 'month_cos',
-            'hour_sin', 'hour_cos',  # Time features
-            'minute_sin', 'minute_cos',
-            'NB_SCATS_SITE_encoded',  # Site ID
-            'scat_type_encoded',  # Scat type
-            'day_type_encoded',  # Day type
-            'school_count_scaled',  # Standardized school count
-            'Flow_scaled'  # Standardized flow (target)
+        # Apply encodings and scaling
+        transformations = [
+            ('NB_SCATS_SITE_encoded', self.data_collector.site_encoder, 'NB_SCATS_SITE'),
+            ('scat_type_encoded', self.data_collector.scat_type_encoder, 'scat_type'),
+            ('day_type_encoded', self.data_collector.day_type_encoder, 'day_type'),
+            ('school_count_scaled', self.data_collector.school_count_scaler, ['school_count']),
+            ('Flow_scaled', self.data_collector.flow_scaler, ['Flow'])
         ]
         
-        # Extract features
-        features = df_processed[feature_cols].values
+        for target_col, transformer, source_col in transformations:
+            df_processed[target_col] = transformer.transform(df_processed[source_col])
         
-        # Add batch dimension for model input
+        return df_processed
+
+    def prepare_data_for_inference(self, df: pd.DataFrame, site_id: Union[str, int], 
+                                 timestamp: Union[str, datetime], seq_len: int = DEFAULT_SEQ_LEN) -> Dict[str, Any]:
+        """Prepare data for inference."""
+        historical_df = self._process_site_data(df, site_id, timestamp, seq_len)
+        df_processed = self._apply_transformations(historical_df)
+        
+        # Extract features and add batch dimension
+        features = df_processed[FEATURE_COLUMNS].values
         X = np.expand_dims(features, axis=0)
         
         return {
             'X': X,
             'site_id': site_id,
-            'features': features,
-            'flow_scaler': self.data_collector.flow_scaler
+            'features': features,            'flow_scaler': self.data_collector.flow_scaler
         }
-    
-    def predict_flow(self, site_id, timestamp, dataset_path=None, num_steps=1):
-        """
-        Predict traffic flow for a specific site and time.
-        
-        Args:
-            site_id: SCATS site ID to predict for
-            timestamp: Datetime to predict for (can be string or datetime object)
-            dataset_path: Path to the dataset file (default: use _sample_final_time_series.csv)
-            num_steps: Number of steps to predict (default: 1)
+
+    def _fit_encoders_if_needed(self, df: pd.DataFrame) -> None:
+        """Fit encoders and scalers if not already fitted."""
+        if hasattr(self.data_collector.site_encoder, 'classes_'):
+            return
             
-        Returns:
-            Dictionary with predicted flow values and metadata
-        """
-        # Load model if not already loaded
+        encoders_and_columns = [
+            (self.data_collector.site_encoder, 'NB_SCATS_SITE'),
+            (self.data_collector.scat_type_encoder, 'scat_type'),
+            (self.data_collector.day_type_encoder, 'day_type'),
+            (self.data_collector.school_count_scaler, ['school_count']),
+            (self.data_collector.flow_scaler, ['Flow'])
+        ]
+        
+        for encoder, column in encoders_and_columns:
+            encoder.fit(df[column])
+
+    def _make_prediction(self, inference_data: Dict[str, Any], num_steps: int) -> np.ndarray:
+        """Make prediction using the loaded model."""
+        X_tensor = torch.FloatTensor(inference_data['X']).to(self.device)
+        
+        with torch.no_grad():
+            predictions = self.model(X_tensor, pred_len=num_steps)
+            return predictions.cpu().numpy()
+
+    def predict_flow(self, site_id: Union[str, int], timestamp: Union[str, datetime], 
+                    dataset_path: Optional[str] = None, num_steps: int = 1) -> Dict[str, Any]:
+        """Predict traffic flow for a specific site and time."""
+        # Load model and dataset
         if self.model is None:
             self.load_model()
-        
-        # Set default dataset path if not provided
-        if dataset_path is None:
-            dataset_path = os.path.join(
-                os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
-                'ML', 'Data', 'Transformed', '_sample_final_time_series.csv'
-            )
-        
-        # Load dataset
+            
+        dataset_path = dataset_path or self._get_default_dataset_path()
         df = pd.read_csv(dataset_path)
         
-        # Fit encoders with the data if not already fitted
-        if not hasattr(self.data_collector.site_encoder, 'classes_'):
-            self.data_collector.site_encoder.fit(df['NB_SCATS_SITE'])
-            self.data_collector.scat_type_encoder.fit(df['scat_type'])
-            self.data_collector.day_type_encoder.fit(df['day_type'])
-            self.data_collector.school_count_scaler.fit(df[['school_count']])
-            self.data_collector.flow_scaler.fit(df[['Flow']])
+        # Fit encoders if needed
+        self._fit_encoders_if_needed(df)
         
         try:
-            # Prepare data for inference
-            # inference_data = self.prepare_data_for_inference(df, site_id, timestamp)
+            # Use fallback site ID if needed (for sample data compatibility)
+            actual_site_id = FALLBACK_SITE_ID if site_id not in df['NB_SCATS_SITE'].values else site_id
             
-            # Fix site_id to 100 since the sample data only contains this site
-            site_id = 100
-            inference_data = self.prepare_data_for_inference(df, site_id, timestamp)
-            
-            # Make prediction
-            X_tensor = torch.FloatTensor(inference_data['X']).to(self.device)
-            
-            with torch.no_grad():
-                predictions = self.model(X_tensor, pred_len=num_steps)
-                predictions = predictions.cpu().numpy()
+            # Prepare data and make prediction
+            inference_data = self.prepare_data_for_inference(df, actual_site_id, timestamp)
+            predictions = self._make_prediction(inference_data, num_steps)
             
             # Denormalize predictions
             predictions_reshaped = predictions.reshape(-1, 1)
