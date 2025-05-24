@@ -4,8 +4,8 @@ Uses GeoPy for geographical calculations and Folium for visualization.
 Includes search functionality to find paths between traffic light locations.
 """
 
-import os
 import sys
+import os
 import pandas as pd
 import geopandas as gpd
 import folium
@@ -13,14 +13,14 @@ from folium.plugins import MarkerCluster, Search
 from PyQt5 import QtWidgets, QtCore, QtWebEngineWidgets
 from PyQt5.QtWidgets import  QMainWindow, QVBoxLayout, QHBoxLayout, QWidget, QLabel, QLineEdit, QPushButton, QComboBox, QGroupBox, QTableWidget, QTableWidgetItem, QHeaderView, QCheckBox, QSlider, QDateTimeEdit
 from PyQt5.QtCore import QDateTime
-from datetime import datetime
+import traceback
 
 # Import search utilities
 from Search.search_utils import find_paths
 # Import chunking utility
 from Utils.filter_chunk import create_chunked_graph, write_chunked_graph_to_file
-# Import ML prediction module
-from ML.predict import get_traffic_predictions
+# Import traffic prediction utilities
+from ML.predict_utils import prepare_traffic_based_search
 
 def read_geojson_file(geojson_file_path):
     """
@@ -359,7 +359,8 @@ class MainWindow(QMainWindow):
                     f"Failed to get traffic predictions. Using distance-based costs.\nError: {str(e)}"
                 )
                 traffic_data = None
-              # Get selected algorithm code
+        
+        # Get selected algorithm code
         algo_text = self.algo_combo.currentText()
         if "AS" in algo_text:
             algorithm = "AS"
@@ -532,6 +533,76 @@ class MainWindow(QMainWindow):
         
         print(f"Applied time-based costs to {applied_count} out of {len(edges)} edges")
         return modified_edges
+
+def get_traffic_predictions(start_time, origin, destination):
+    """
+    Get traffic predictions for a specified start time, origin and destination.
+    
+    Args:
+        start_time (str): Start time for prediction in format 'YYYY-MM-DD HH:MM:SS'
+        origin (str): Origin node ID
+        destination (str): Destination node ID
+        
+    Returns:
+        dict: Dictionary containing prediction results with keys:
+            - status: 'success' or 'error'
+            - time_costs: Dictionary mapping edge tuples to travel time costs (if successful)
+            - error: Error message (if failed)
+    """
+    try:
+        # Create temporary chunked graph file path
+        chunked_graph_path = os.path.join('Data', 'temp_chunked_graph.txt')
+        output_path = os.path.join('Data', 'traffic_graph.txt')
+        
+        # Prepare graph with traffic predictions
+        updated_graph_path = prepare_traffic_based_search(
+            origin, destination, start_time, 
+            chunked_graph_path=chunked_graph_path, 
+            output_path=output_path
+        )
+        
+        if updated_graph_path:
+            # Parse the updated graph to extract edge costs
+            # Import parser for reading the graph file
+            import importlib.util
+            spec = importlib.util.spec_from_file_location(
+                "parser", 
+                os.path.join(os.path.dirname(os.path.abspath(__file__)), 'Search', 'data_reader', 'parser.py')
+            )
+            parser_module = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(parser_module)
+            parse_graph_file = parser_module.parse_graph_file
+            
+            # Parse the updated graph file to get edges with new costs
+            _, edges, _, _ = parse_graph_file(updated_graph_path)
+            
+            # Format edges as tuples for compatibility with the apply_traffic_costs method
+            time_costs = {}
+            for edge_str, cost in edges.items():
+                # Convert edge string to tuple if it's not already
+                if isinstance(edge_str, tuple):
+                    node1, node2 = edge_str
+                else:
+                    # This shouldn't happen with the current implementation, but added for robustness
+                    parts = edge_str.strip('()').split(',')
+                    node1, node2 = parts[0], parts[1]
+                
+                time_costs[(node1, node2)] = cost
+            
+            return {
+                'status': 'success',
+                'time_costs': time_costs
+            }
+        else:            
+            return {
+                'status': 'error',
+                'error': 'Failed to prepare traffic-based search graph'
+            }
+    except Exception as e:
+        return {
+            'status': 'error',
+            'error': f"Error in traffic prediction: {str(e)}\n{traceback.format_exc()}"
+        }
 
 def main():
     """
