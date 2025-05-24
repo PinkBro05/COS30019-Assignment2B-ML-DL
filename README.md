@@ -1,285 +1,254 @@
-# COS30019 Assignment 2B - ML-DL
-# Travel Time Estimation Using Deep Learning Models
+# COS30019 Assignment 2B - AI-Enhanced Traffic Navigation System
 
-This project focuses on estimating travel time using traffic flow data with various deep learning models. The implementation includes Transformer, LSTM, and GRU architectures for time series prediction.
+This project combines artificial intelligence search algorithms and machine learning for intelligent traffic navigation. It features an interactive GUI application that visualizes Melbourne traffic lights on a map and provides optimal pathfinding with real-time traffic predictions.
+
+## Key Features
+
+- **Interactive Map Visualization**: PyQt5-based GUI with Folium integration showing Melbourne traffic lights
+- **Multiple Search Algorithms**: Comprehensive suite of AI search algorithms
+- **Machine Learning Integration**: Deep learning models for traffic flow prediction
+- **Real-time Path Optimization**: Combines search algorithms with ML predictions for time-optimal routes
+- **Comparative Analysis**: Side-by-side algorithm performance evaluation
 
 ## Project Structure
 
 ```
-├── Data/
-|   ├── Data_dictionary.docx   # Contain metadata and note about the datasets
-│   ├── Raw/                    # Raw traffic data files
-│   │   ├── main/               # Contains original SCATS traffic flow data by year
-│   │   │   ├── 2014/           # Traffic data for 2014 (VSDATA_*.csv files)
-│   │   │   ├── 2025_public_holiday.csv # Public holiday data
-│   │   │   ├── Scat_Data.csv   # SCATS data information
-│   │   │   ├── scat_type.csv   # Types of SCATS sites
-│   │   │   ├── school.csv      # School location data
-│   │   │   ├── Traffic_Lights.csv # Traffic light location data
-│   │   │   └── Traffic_Lights.geojson # GeoJSON for traffic lights
-│   │   └── metadata and excel file/ #Unit Files 
-│   └── Transformed/            # Preprocessed and transformed data ready for models
-│       ├── _sample_final_time_series.csv # Sample of time series data
-│       ├── _sample_final.csv   # Sample of transformed data
-│       ├── 2006_final_scats_data.csv # Unit provided data
-│       ├── 2024_final_time_series.csv # Final data - in wide table form for 2024
-│       ├── test_2025_final_time_series.csv # 2025 test data
-│       └── school_dic.csv      # School count data for each SCATS site
-├── Transformer/                # Transformer model implementation
-│   ├── models/                 # Model architecture definitions
-│   │   ├── model.py           # Main Transformer model implementation
-│   │   ├── math.py            # Math utility functions
-│   │   ├── vanila_encoder.py  # Encoder implementation
-│   │   └── vanila_decoder.py  # Decoder implementation
-│   ├── utils/
-│   │   └── traffic_data_collector.py  # Data loading and preparation for Transformer
-│   ├── supervised_learning.py # Training script for Transformer model
-│   └── inference.py           # Script for making predictions with trained models
-├── LSTM/                       # LSTM model implementation 
-├── GRU/                        # GRU model implementation
-│   ├── data/                   # Data processing modules
-│   │   ├── data.py             # Main data processing functions
-│   │   ├── parse_data.py       # Data parsing utilities
-│   │   ├── train.csv           # Training dataset
-│   │   └── test.csv            # Testing dataset
-│   ├── images/                 # Architecture diagrams
-│   │   ├── GRU.png             # GRU model architecture diagram
-│   │   └── LSTM.png            # LSTM model architecture diagram
-│   ├── model/                  # Model definitions
-│   │   ├── model.py            # GRU and LSTM model implementations
-│   │   ├── gru.h5              # Saved GRU model
-│   │   └── lstm.h5             # Saved LSTM model
-│   ├── main.py                 # Main execution script for predictions
-│   └── train.py                # Training script for GRU and LSTM models
-└── Utils/                      # Utility scripts for data processing
-    ├── feature_engineering.py  # Add features like school count, site type, day type
-    ├── path_utilities.py       # Utilities for managing file paths
-    ├── pre_process.py          # Main preprocessing pipeline script
-    ├── time_series_reshaping.py # Reshape data for time series modeling
-    └── traffic_data_transformation.py # Transform raw SCATS data
+├── main.py                     # Main GUI application with interactive map
+├── Data/                       # Traffic data and graph files
+│   ├── graph.txt              # Road network graph data
+│   ├── Traffic_Lights.geojson # Melbourne traffic lights location data
+│   └── temp_chunked_graph.txt # Temporary chunked graph for optimization
+├── Search/                     # AI Search Algorithms Implementation
+│   ├── search_utils.py        # Main search interface and utilities
+│   ├── Uninformed_Search/     # BFS, DFS implementations
+│   ├── Informed_Search/       # A*, Greedy Best-First Search
+│   ├── Custom_Search/         # Dijkstra's Algorithm, Ant Colony Optimization
+│   └── data_reader/           # Graph file parsing utilities
+├── ML/                        # Machine Learning for Traffic Prediction
+│   ├── predict_utils.py       # ML integration utilities
+│   ├── Transformer/           # Transformer model for time series prediction
+│   ├── LSTM/                  # LSTM model implementation
+│   ├── GRU/                   # GRU model implementation
+│   └── Utils/                 # Data preprocessing and feature engineering
+└── Utils/                     # General utilities
+    ├── create_graph.py        # Graph creation from traffic data
+    ├── filter_chunk.py        # Graph chunking for performance optimization
+    └── connect_components.py  # Graph connectivity analysis
 ```
-
-## Dataset: [HuggingFace](https://huggingface.co/datasets/PinkBro/vicroads-traffic-signals)
-
-## Data Description
-
-The project uses SCATS (Sydney Coordinated Adaptive Traffic System) traffic flow data from 2014 to 2024 [SCAT](https://opendata.transport.vic.gov.au/dataset/traffic-signal-volume-data). The data includes:
-- Traffic volume counts at 15-minute intervals 
-- Multiple detector sites across road networks
-- Additional contextual data like [public holidays](https://data.gov.au/dataset/ds-dga-b1bc6077-dadd-4f61-9f8c-002ab2cdff10/details?q=Australian%20public%20holidays%20combined%C2%A0(2021%E2%80%91{})), [school locations](https://discover.data.vic.gov.au/dataset/school-locations-2024), [traffic lights](https://discover.data.vic.gov.au/dataset/traffic-lights) etc.
-
-The raw data is preprocessed and transformed into a format suitable for time series prediction models.
-
-## Models
-
-### Transformer Model (Vanila)
-- Uses self-attention mechanism to capture temporal dependencies
-- Encoder-decoder architecture for sequence-to-sequence prediction
-- Implements standard transformer components including multi-head attention
-
-### LSTM & GRU Models
-- Placeholder directories for future implementation of recurrent neural network models
 
 ## Getting Started
 
-### Data Preprocessing
-**Note:** This step expects large amount of time and computational resource due to the amount of raw data
+### Prerequisites
 
-The project includes a comprehensive data preprocessing pipeline in the `Utils` folder. Follow these steps to preprocess the raw traffic data:
+Install the required dependencies:
 
-1. **Basic Usage**:
+```powershell
+pip install PyQt5 QWebEngineWidgets folium geopandas pandas numpy matplotlib scikit-learn torch
+```
 
-   Run the complete preprocessing pipeline with default settings:
-   ```bash
-   python Utils/pre_process.py
+### Quick Start
+
+1. **Launch the Interactive Application**:
+   ```powershell
+   python main.py
    ```
 
-   This will:
-   - Transform **raw SCATS data** (This assume you have downloaded all data from [SCAT](https://opendata.transport.vic.gov.au/dataset/traffic-signal-volume-data), create and name folder by year and extract data to the folder. E.g. `Data/Raw/main/2014` - same for the rest) 
-   - Apply feature engineering (add school counts, site types, etc.)
-   - Reshape data for time series modeling
-   - Output final preprocessed files in the `Data/Transformed` directory
+2. **Using the GUI**:
+   - **Origin/Destination**: Enter SITE_NO values for traffic lights
+   - **Algorithm Selection**: Choose from 6 different search algorithms
+   - **Traffic Prediction**: Enable ML-based time predictions
+   - **Results**: View multiple optimal paths with costs
+   - **Visualization**: Click "Show on Map" to visualize paths
 
-2. **Advanced Options**:
+### Available Search Algorithms
 
-   Process specific years and customize output:
-   ```bash
-   python Utils/pre_process.py --years 2014 2015 2016 --split
-   ```
+| Algorithm | Code | Type | Use Case |
+|-----------|------|------|----------|
+| **A* Search** | AS | Informed | Optimal pathfinding with heuristics |
+| **Greedy Best-First** | GBFS | Informed | Fast pathfinding (may not be optimal) |
+| **Breadth-First Search** | BFS | Uninformed | Guaranteed shortest path (unweighted) |
+| **Depth-First Search** | DFS | Uninformed | Memory efficient exploration |
+| **Dijkstra's Algorithm** | CUS1 | Custom | Optimal shortest path (weighted graphs) |
+| **Ant Colony Optimization** | CUS2 | Custom | Bio-inspired optimization |
 
-   Available options:
-   - `--data-path`: Custom path to the raw data directory (`Data/Raw/main/`)
-   - `--years`: List of specific years to process (e.g., 2014 2015)
-   - `--split`: Split output into separate files for date ranges (2014-2019 and 2020-2024)
-   - `--start-date`: Filter data starting from this date (YYYY-MM-DD)
-   - `--end-date`: Filter data until this date (YYYY-MM-DD)
+## Machine Learning Integration
 
-3. **Individual Preprocessing Steps**:
+### Traffic Flow Prediction
 
-   You can also run each preprocessing component separately:
+The system includes three deep learning models for traffic flow prediction:
 
-   a. **Data Transformation**:
-   ```bash
-   python -c "from Utils.traffic_data_transformation import TrafficDataTransformer; transformer = TrafficDataTransformer('Data/Raw/main', years=['2014']); transformer.process_all_years()"
-   ```
-
-   b. **Feature Engineering**:
-   ```bash
-   python -c "from Utils.feature_engineering import feature_engineering; feature_engineering('.')"
-   ```
-
-   c. **Time Series Reshaping**:
-   ```bash
-   python -c "from Utils.time_series_reshaping import reshape_traffic_data; reshape_traffic_data('Data/Transformed/2014_featured_scats_data.csv', 'Data/Transformed/2014_time_series.csv')"
-   ```
-
-4. **Data Preprocessing Workflow**:
-
-   The complete preprocessing workflow includes:
+1. **Transformer Model** (Primary)
+   - Attention-based architecture for sequence prediction
+   - Best performance for traffic time series
    
-   I. **Raw Data Transformation**: Converts raw SCATS data to a structured format
+2. **LSTM Model**
+   - Long Short-Term Memory for temporal patterns
+   
+3. **GRU Model**
+   - Gated Recurrent Units for efficient processing
 
-   II. **Feature Engineering**: Adds contextual features:
-      - School counts near each SCATS site
-      - Traffic light and SCATS site types
-      - Public holiday information
+### Using ML Predictions
 
-   III. **Time Series Reshaping**: Formats data for sequence prediction tasks
+1. **Enable Traffic Predictions**: Check the "Use Traffic Flow Predictions" checkbox
+2. **Set Time**: Choose the start time for prediction
+3. **Run Search**: The system will:
+   - Use ML models to predict traffic flow
+   - Convert predictions to time-based edge costs
+   - Find time-optimal paths instead of distance-optimal
 
-### Training a Model
+### Training ML Models
 
-To train the Transformer model:
+For detailed ML model training instructions, see [`ML/ML_README.md`](ML/ML_README.md).
 
-```bash
+**Quick training example**:
+```powershell
+cd ML
 python Transformer/supervised_learning.py --data_file Data/Transformed/2024_final_time_series.csv
 ```
 
-#### Training Parameters
+## Search Algorithm Usage
 
-You can customize the training process with various command-line arguments:
+### Interactive GUI Usage
 
-```bash
-python Transformer/supervised_learning.py --data_file Data/Transformed/2024_final_time_series.csv --batch_size 64 --num_epochs 100 --learning_rate 0.0001
+1. Launch the application: `python main.py`
+2. Enter origin and destination SITE_NO values
+3. Select algorithm from dropdown
+4. Optionally enable traffic predictions
+5. Click "Find Paths" to see results
+
+### Programmatic Usage
+
+```python
+from Search.search_utils import find_paths
+
+# Find paths using different algorithms
+paths = find_paths('Data/graph.txt', origin='1001', destination='1002', algorithm='AS')
+
+# With traffic predictions
+from ML.predict_utils import prepare_traffic_based_search
+if prepare_traffic_based_search('2024-01-01 09:00:00', '1001', '1002'):
+    paths = find_paths('Data/temp_chunked_graph.txt', '1001', '1002', 'DIJK')
 ```
 
-Key parameters:
-- `--data_file`: Path to the time series data file (required)
-- `--batch_size`: Batch size for training (default: 32)
-- `--num_epochs`: Number of training epochs (default: 50)
-- `--learning_rate`: Learning rate for optimizer (default: 0.0001)
-- `--embedding_dim`: Dimension for categorical embeddings (default: 16)
-- `--d_model`: Transformer model dimension (default: a64)
-- `--num_heads`: Number of attention heads (default: 8)
-- `--num_layers`: Number of encoder/decoder layers (default: 3)
-- `--weight_decay`: Weight decay for regularization (default: 1e-5)
+### Algorithm-Specific Features
 
-#### Examples
+**A* Search**:
+- Optimal pathfinding with Manhattan distance heuristic
+- Excellent performance on grid-like networks
 
-Train on a sample dataset (quick test):
-```bash
-python Transformer/supervised_learning.py --data_file Data/Transformed/_sample_final_time_series.csv --num_epochs 10
+**Ant Colony Optimization**:
+- Bio-inspired optimization
+- Configurable parameters (pheromone, evaporation rates)
+- Supports parallel processing
+
+**Dijkstra's Algorithm**:
+- Guaranteed optimal shortest path
+- Works with weighted graphs
+- Good baseline algorithm
+
+## GUI Features
+
+### Interactive Map
+- **Zoom/Pan**: Navigate Melbourne traffic network
+- **Markers**: Click traffic lights for details
+- **Path Visualization**: Routes highlighted in red
+- **Origin/Destination**: Color-coded start/end points
+
+### Search Panel
+- **Real-time Input Validation**: Checks for valid SITE_NO values
+- **Algorithm Comparison**: Switch between algorithms to compare results
+- **Cost Display**: Shows both distance and time costs
+- **Results Table**: Multiple paths ranked by optimality
+
+### Performance Optimization
+- **Graph Chunking**: Automatically reduces search space
+- **Parallel Processing**: Multi-threaded ACO implementation
+- **Caching**: Optimized data structures for repeated searches
+
+## Data Sources
+
+The project uses several Melbourne traffic datasets:
+
+- **Traffic Signal Volume Data**: [VicRoads OpenData](https://opendata.transport.vic.gov.au/dataset/traffic-signal-volume-data)
+- **Traffic Light Locations**: [VicGov Discover](https://discover.data.vic.gov.au/dataset/traffic-lights)
+- **School Locations**: [VicGov Education Data](https://discover.data.vic.gov.au/dataset/school-locations-2024)
+- **Public Holidays**: [Australian Government Data](https://data.gov.au/dataset/ds-dga-b1bc6077-dadd-4f61-9f8c-002ab2cdff10/details)
+
+## Advanced Configuration
+
+### Algorithm Parameters
+
+**ACO Configuration**:
+```python
+# In Search/Custom_Search/aco_search.py
+aco = ACO(
+    graph=graph,
+    ant_max_steps=500,
+    num_iterations=100,
+    evaporation_rate=0.1,
+    alpha=0.7,  # Pheromone importance
+    beta=0.3,   # Distance importance
+)
 ```
 
-Train with a larger model for better performance:
-```bash
-python Transformer/supervised_learning.py --data_file Data/Transformed/2024_final_time_series.csv --d_model 128 --num_heads 8 --num_layers 4
+**Graph Chunking**:
+```python
+# Adjust chunking aggressiveness
+filtered_nodes, filtered_edges, _, _ = create_chunked_graph(
+    graph_file_path, origin, destination, margin_factor=0.1  # Increase for larger search area
+)
 ```
 
-The training script will:
-- Load and prepare the transformed time series data
-- Create and train the Transformer model with specified parameters
-- Save the best model to `Transformer/save_models/transformer_traffic_model.pth`
-- Generate training history plots in `Transformer/save_figures/transformer_training_history.png`
+### Performance Tuning
 
-### Testing a Trained Model
+- **Large Graphs**: Increase chunking margin_factor
+- **Memory Constraints**: Use DFS instead of BFS
+- **Speed Priority**: Use GBFS or reduce ACO iterations
+- **Accuracy Priority**: Use Dijkstra or A* with tight heuristics
 
-You can test a trained model's performance on test data:
+## Troubleshooting
 
-```bash
-python Transformer/supervised_learning.py --data_file Data/Transformed/2024_final_time_series.csv --test --model_path Transformer/save_models/transformer_traffic_model.pth
-```
+### Common Issues
 
-#### Testing Parameters
+**"SITE_NO not found"**: 
+- Check that traffic light data is properly loaded
+- Verify SITE_NO format (usually 4-digit numbers)
 
-Key parameters for testing:
-- `--test`: Flag to run in test mode instead of training
-- `--data_file`: Path to the test data file
-- `--model_path`: Path to the saved model (required for testing)
-- `--plot_test_results`: Plot visualization of test results (default: True)
-- `--test_plot_name`: Name for the test results plot (default: transformer_test_results.png)
+**Search timeout**:
+- Increase chunking margin_factor
+- Use simpler algorithms (BFS/DFS) for initial testing
 
-The test function will:
-- Evaluate the model on the test dataset
-- Calculate performance metrics (MSE, MAE, RMSE)
-- Generate a scatter plot comparing predicted vs. actual values
-- Save the visualization to `Transformer/save_figures/transformer_test_results.png` (or custom name)
+**ML prediction errors**:
+- Ensure trained models exist in `ML/*/save_models/`
+- Check data preprocessing completion
 
-#### Examples
-
-Test with a specific model on the 2020-2024 dataset:
-```bash
-python Transformer/supervised_learning.py --data_file Data/Transformed/final_time_series_2020_2024.csv --test --model_path Transformer/save_models/transformer_traffic_model.pth
-```
-
-Test on sample data with a custom plot name:
-```bash
-python Transformer/supervised_learning.py --data_file Data/Transformed/_sample_final_time_series.csv --test --model_path Transformer/save_models/transformer_traffic_model.pth --test_plot_name my_test_results.png
-```
-
-### Making Predictions
-
-To make predictions with a trained model:
-
-```bash
-python Transformer/inference.py
-```
-
-#### Inference Parameters
-
-The inference script offers several parameters to customize prediction:
-
-```bash
-python Transformer/inference.py --input_path Data/Transformed/final_time_series_2020_2024.csv --index 1000 --output_step 4 --output_file predictions.png
-```
-
-Key parameters:
-- `--input_path`: Path to the test CSV file (default: sample data)
-- `--index`: Row index in the CSV file to use as the prediction point (default: random)
-- `--output_step`: Number of step to predict (default: 4)
-- `--model_path`: Path to the saved model (default: uses the standard saved model)
-- `--output_file`: Path to save the prediction plot (optional)
-
-#### Examples
-
-Predict using a specific model at a particular time point:
-```bash
-python Transformer/inference.py --input_path Data/Transformed/final_time_series_2020_2024.csv --index 5000 --model_path Transformer/save_models/transformer_traffic_model.pth
-```
-
-Run inference on different datasets:
-```bash
-python Transformer/inference.py --input_path Data/Transformed/_sample_final_time_series.csv
-```
-
-The inference script will:
-- Load the specified time series data
-- Prepare the data for the selected index point
-- Make predictions for the next 4 time steps (1 hour)
-- Display a visualization comparing predicted values with actual values (if available)
-- Save the visualization to the specified output file (if provided)
-
-## Dependencies
-
-- PyTorch
-- NumPy
-- Pandas
-- Matplotlib
-- scikit-learn
-- warnings (for suppressing warnings)
+**GUI not loading**:
+- Verify PyQt5 and QWebEngine installation
+- Check file permissions for HTML generation
 
 ## Contributors
-1. **Hong Anh Nguyen** - Data, Transformer
-2. **Phong Tran** - LSTM
-3. **James Luong**- GRU
 
-COS30019 - Introduction to Artificial Intelligence - Assignment 2B
+- **Hong Anh Nguyen** - Data Processing, Transformer Model, Search Algorithms
+- **Phong Tran** - LSTM Model Implementation
+- **James Luong** - GRU Model Implementation
+
+## Academic Context
+
+**Course**: COS30019 - Introduction to Artificial Intelligence  
+**Assignment**: 2B - Machine Learning & Deep Learning Integration  
+**Institution**: Swinburne University of Technology
+
+## Requirements
+
+- Python 3.8+
+- PyQt5 with WebEngine
+- PyTorch 1.8+
+- Geopandas, Folium
+- Pandas, NumPy, Matplotlib, Scikit-learn
+
+## External Links
+
+- [Project Dataset on HuggingFace](https://huggingface.co/datasets/PinkBro/vicroads-traffic-signals)
+- [Detailed ML Documentation](ML/ML_README.md)
+
+---
