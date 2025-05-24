@@ -395,8 +395,42 @@ class MainWindow(QMainWindow):
             self.results_table.setCellWidget(i, 2, show_button)
     
     def show_path_on_map(self, path):
-        # TODO Implement the logic to highlight the path on the map and zoom in on it, fixing bug for AS and GBFS
-        pass
+        # Retrieve coordinates for each site in the path
+        coords = []
+        for site in path:
+            # Match SITE_NO as string to handle numeric/string types
+            row = self.gdf[self.gdf['SITE_NO'].astype(str) == str(site)].iloc[0]
+            coords.append([row['latitude'], row['longitude']])
+            
+        # Recreate base map with all markers
+        self.map_obj = create_map(self.gdf)
+        
+        # Add markers for Origin and Destination
+        if coords:
+            # Add origin marker
+            folium.Marker(
+                location=coords[0],
+                popup=f"Origin: {path[0]}",
+                icon=folium.Icon(color='green', icon='info-sign')
+            ).add_to(self.map_obj)
+            
+            # Add destination marker
+            folium.Marker(
+                location=coords[-1],
+                popup=f"Destination: {path[-1]}",
+                icon=folium.Icon(color='red', icon='info-sign')
+            ).add_to(self.map_obj)
+                
+        # Add the path as a red polyline
+        folium.PolyLine(coords, color='red', weight=5, opacity=0.8).add_to(self.map_obj)
+        
+        # Adjust map to fit the path bounds
+        self.map_obj.fit_bounds(coords)
+        
+        # Save and reload the updated map
+        output_file = 'map_output.html'
+        self.map_obj.save(output_file)
+        self.map_widget.load(QtCore.QUrl.fromLocalFile(os.path.abspath(output_file)))
 
 def main():
     """
