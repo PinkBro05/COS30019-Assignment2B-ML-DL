@@ -1,1 +1,1 @@
-from parser import parse_graph_file
+from .parser import parse_graph_file

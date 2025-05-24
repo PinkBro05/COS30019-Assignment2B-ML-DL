@@ -1,11 +1,13 @@
 import re
 
-def parse_graph_file(file_path):
+def parse_graph_file(file_path, origin=None, destinations=None):
     """
     Parses a text file containing graph data and extracts nodes, edges, origin, and destinations.
     
     Args:
         file_path (str): Path to the text file containing the graph data.
+        origin (str, optional): If provided, overrides the origin node from the file.
+        destinations (list or set, optional): If provided, overrides the destinations from the file.
     
     Returns:
         tuple: A tuple containing:
@@ -16,8 +18,8 @@ def parse_graph_file(file_path):
     """
     nodes = {}
     edges = {}
-    origin = None
-    destinations = []
+    file_origin = None
+    file_destinations = []
     
     with open(file_path, 'r') as file:
         lines = file.readlines()
@@ -38,27 +40,31 @@ def parse_graph_file(file_path):
             elif line.startswith("Destinations:"):
                 section = "destinations"
                 continue
-            
             if section == "nodes":
-                match = re.match(r"(\d+): \((\d+),(\d+)\)", line)
+                # Updated regex to handle floating-point coordinates
+                match = re.match(r"(\d+): \((-?\d+\.?\d*),(-?\d+\.?\d*)\)", line)
                 if match:
                     node_id = str(match.group(1))
-                    x, y = int(match.group(2)), int(match.group(3))
+                    x, y = float(match.group(2)), float(match.group(3))
                     nodes[node_id] = (x, y)
-            
             elif section == "edges":
-                match = re.match(r"\((\d+),(\d+)\): (\d+)", line)
+                # Updated regex to be more flexible with whitespace
+                match = re.match(r"\s*\((\d+),(\d+)\):\s*(\d+)", line)
                 if match:
                     node1, node2, weight = str(match.group(1)), str(match.group(2)), int(match.group(3))
                     edges[(node1, node2)] = weight
             
             elif section == "origin":
-                origin = str(line)
+                file_origin = str(line)
             
             elif section == "destinations":
-                destinations = set([d.strip() for d in line.split(';') if d.strip()])
+                file_destinations = set([d.strip() for d in line.split(';') if d.strip()])
     
-    return nodes, edges, origin, destinations
+    # Use provided origin and destinations if available, otherwise use what was in the file
+    actual_origin = origin if origin is not None else file_origin
+    actual_destinations = set(destinations) if destinations is not None else file_destinations
+    
+    return nodes, edges, actual_origin, actual_destinations
 
 # Example usage:
 if __name__ == "__main__":

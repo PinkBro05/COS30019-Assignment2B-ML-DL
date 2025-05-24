@@ -238,3 +238,34 @@ def main():
 # Example usage:
 if __name__ == "__main__":
     main()
+
+def a_star_search(network, start, goal):
+    """
+    Standardized interface for A* algorithm that works with the search_utils.py.
+    
+    Args:
+        network (Network): Network object containing the graph
+        start (str): Starting node
+        goal (str): Target node
+        
+    Returns:
+        list: List of node IDs representing the path from start to goal,
+              or None if no path is found
+    """
+    try:
+        # Extract necessary information from the network
+        graph = {node: [neighbor for neighbor in network.neighbors(node)] for node in network.graph}
+        positions = network.pos
+        
+        # Create heuristic dictionary
+        heuristic = {}
+        for node in graph:
+            for neighbor in graph[node]:
+                heuristic[(node, neighbor)] = network.get_edge_cost(node, neighbor)
+        
+        # Run A* algorithm
+        path = a_star(graph, positions, start, goal, heuristic)
+        return path
+    except Exception as e:
+        print(f"Error in A* search: {e}")
+        return None

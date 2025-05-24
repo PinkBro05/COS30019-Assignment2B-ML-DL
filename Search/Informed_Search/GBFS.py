@@ -1,6 +1,7 @@
 import matplotlib.pyplot as plt
 import numpy as np
 import heapq
+import math
 import re
 import sys, os
 
@@ -45,7 +46,7 @@ def find_next_node(graph, current, visited_list, pos, goal):
         # print("Heuristic value:", heuristic_value)
         return heapq.heappop(heuristic_value)
 
-def GBFS_search(graph, start, goal, heuristic):
+def gbfs(graph, start, goal, pos):
     # path dictionary to track the explored paths
     path = {start:None}
 
@@ -62,25 +63,24 @@ def GBFS_search(graph, start, goal, heuristic):
         visited.add(current_node)
 
         # if the goal is reached, reconstruct the path
-        if goal in visited:
+        if current_node == goal:
             return reconstruct_path(path, start, goal)
 
         # find next node
         next_node = find_next_node(graph, current_node, visited, pos, goal)
         if next_node == "Dead end":
-            print("Dead end at node ", current_node)
+            # print("Dead end at node ", current_node)
             # Go back to the previous node
             # and check for other paths
-            heapq.heappush(priority_queue, Node(path[current_node], find_heuristic(pos, path[current_node], goal)))
+            if current_node in path and path[current_node] is not None:
+                heapq.heappush(priority_queue, Node(path[current_node], find_heuristic(pos, path[current_node], goal)))
         elif next_node == "Loop":
             count = 0
-            print("Loop at node ", current_node)
+            # print("Loop at node ", current_node)
             # Go back to the previous node
             # and check for other paths
-            heapq.heappush(priority_queue, Node(path[current_node], find_heuristic(pos, path[current_node], goal)))
-            if count == 5:
-                print("Loop detected at node ", current_node)
-                return reconstruct_path(path, start, current_node)
+            if current_node in path and path[current_node] is not None:
+                heapq.heappush(priority_queue, Node(path[current_node], find_heuristic(pos, path[current_node], goal)))
             count += 1
         else:
             heapq.heappush(priority_queue, next_node)
@@ -96,8 +96,8 @@ def reconstruct_path(path, start, goal):
 
     while current is not None:
         result_path.append(current)
-        current = path[current]
-        
+        current = path.get(current)
+    
     result_path.reverse()
     return result_path
 
@@ -217,3 +217,28 @@ def main():
 # Example usage:
 if __name__ == "__main__":
     main()
+
+def gbfs_search(network, start, goal):
+    """
+    Standardized interface for GBFS algorithm that works with the search_utils.py.
+    
+    Args:
+        network (Network): Network object containing the graph
+        start (str): Starting node
+        goal (str): Target node
+        
+    Returns:
+        list: List of node IDs representing the path from start to goal,
+              or None if no path is found
+    """
+    try:
+        # Extract necessary information from the network
+        graph = {node: [neighbor for neighbor in network.neighbors(node)] for node in network.graph}
+        positions = network.pos
+        
+        # Run GBFS algorithm
+        path = gbfs(graph, start, goal, positions)
+        return path
+    except Exception as e:
+        print(f"Error in GBFS search: {e}")
+        return None

@@ -8,11 +8,11 @@ sys.path.append(parent_dir)
 
 current_dir = os.path.dirname(os.path.abspath(__file__))
 sys.path.append(os.path.join(current_dir, "..", "data_reader"))
-from parser import parse_graph_file
+from ..data_reader import parse_graph_file
 
 # Import the BfsNetwork class
 sys.path.append(os.path.join(current_dir, "entity"))
-from Uninformed_Search.entity.BfsNetwork import BfsNetwork
+from .entity.BfsNetwork import BfsNetwork
 
 def main():
     # Initialize the parser

@@ -175,11 +175,5 @@ cython_debug/
 COS30019-2025 S1-A2_B.pdf
 Data/Raw/Data_dictionary.docx
 
-Data/Raw/main/20*/
-Data/Transformed/201*.csv
-Data/Transformed/202*.csv
-Data/Transformed/final_time_series_*.csv
-Data/Data_dictionary.docx
-Data/Raw/main/Test/traffic_signal_volume_data_january_2025.zip
-Data/Raw/main/Test/*.csv
-Data/Transformed/test_2025_final_time_series.csv
+Data/*.txt
+map_output.html
