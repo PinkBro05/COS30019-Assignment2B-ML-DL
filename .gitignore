@@ -177,3 +177,4 @@ Data/Raw/Data_dictionary.docx
 
 Data/*.txt
 map_output.html
+Search/Uninformed_Search/entity/__pycache__/SearchNetwork.cpython-312.pyc
