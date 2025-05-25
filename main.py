@@ -160,23 +160,24 @@ def create_search(gdf, map_obj):
     scats_layer = folium.FeatureGroup(name='Traffic Lights', show=False)
     scats = folium.GeoJson(
         gdf,
-        name='Traffic Lights',
         show=False,
     )
     
+    # Add the layer to the map
+    scats.add_to(scats_layer)
+    scats_layer.add_to(map_obj)
+    
     # Add search functionality
     search = Search(
-        layer=scats,
+        layer=scats_layer,
         geom_type='Point',
         placeholder='Search by Site No or Name',
         collapsed=True,
         search_label='SITE_NO',
-        position='topright'
+        position='topright',
+        search_zoom= 16,
     ).add_to(map_obj)
 
-    # Add the layer to the map
-    scats.add_to(scats_layer)
-    scats_layer.add_to(map_obj)
 
 class MainWindow(QMainWindow):
     """Main application window with map view and search panel"""
