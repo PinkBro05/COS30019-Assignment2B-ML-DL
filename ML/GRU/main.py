@@ -1,5 +1,5 @@
 """
-Traffic Flow Prediction with Neural Networks(SAEs、LSTM、GRU).
+Traffic Flow Prediction with Neural Networks(LSTM、GRU).
 """
 import math
 import warnings
@@ -55,11 +55,11 @@ def eva_regress(y_true, y_pred):
     mse = metrics.mean_squared_error(y_true, y_pred)
     r2 = metrics.r2_score(y_true, y_pred)
     print('explained_variance_score:%f' % vs)
-    print('mape:%f%%' % mape)
-    print('mae:%f' % mae)
-    print('mse:%f' % mse)
-    print('rmse:%f' % math.sqrt(mse))
-    print('r2:%f' % r2)
+    print('mape:%f%%' % mape) # Mean Absolute Percentage Error
+    print('mae:%f' % mae) # Mean Absolute Error
+    print('mse:%f' % mse) # Mean Squared Error
+    print('rmse:%f' % math.sqrt(mse)) # Root Mean Squared Error
+    print('r2:%f' % r2) # Coefficient of Determination
 
 
 def plot_results(y_true, y_preds, names):
@@ -72,7 +72,7 @@ def plot_results(y_true, y_preds, names):
         names: List, Method names.
     """
     d = '2016-3-4 00:00'
-    x = pd.date_range(d, periods=288, freq='15min') # 
+    x = pd.date_range(d, periods=96, freq='15min')
 
     fig = plt.figure()
     ax = fig.add_subplot(111)
@@ -94,17 +94,15 @@ def plot_results(y_true, y_preds, names):
     
 
 def main():
-    lstm = load_model('ML/GRU/model/lstm.h5')
     gru = load_model('ML/GRU/model/gru.h5')
-    models = [lstm, gru]
-    names = ['LSTM', 'GRU']
+    models = [gru]
+    names = ['GRU']
 
     lag = 12
     file1 = 'ML/GRU/data/train.csv'
     file2 = 'ML/GRU/data/test.csv'
     _, _, X_test, y_test, scaler = process_data(file1, file2, lag)
     y_test = scaler.inverse_transform(y_test.reshape(-1, 1)).reshape(1, -1)[0]
-    print('y_test:', y_test[: 288])
 
     y_preds = []
     for name, model in zip(names, models):
@@ -116,11 +114,11 @@ def main():
         plot_model(model, to_file=file, show_shapes=True)
         predicted = model.predict(X_test)
         predicted = scaler.inverse_transform(predicted.reshape(-1, 1)).reshape(1, -1)[0]
-        y_preds.append(predicted[:288])
+        y_preds.append(predicted[:96])
         print(name)
         eva_regress(y_test, predicted)
 
-    plot_results(y_test[: 288], y_preds, names)
+    plot_results(y_test[: 96], y_preds, names)
 
 
 if __name__ == '__main__':
