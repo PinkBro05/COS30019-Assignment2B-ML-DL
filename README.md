@@ -227,7 +227,7 @@ filtered_nodes, filtered_edges, _, _ = create_chunked_graph(
 
 ## Contributors
 
-- **Hong Anh Nguyen** - Data Processing, Transformer Model, Search Algorithms
+- **Hong Anh Nguyen** - Data Processing, Transformer Model, ACO algorithm integration, Transformer model integration and GUI Design
 - **Phong Tran** - LSTM Model Implementation
 - **James Luong** - GRU Model Implementation
 
