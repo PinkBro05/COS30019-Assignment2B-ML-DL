@@ -1,10 +1,10 @@
 # COS30019 Assignment 2B - AI-Enhanced Traffic Navigation System
 
-This project combines artificial intelligence search algorithms and machine learning for intelligent traffic navigation. It features an interactive GUI application that visualizes Melbourne traffic lights on a map and provides optimal pathfinding with real-time traffic predictions.
+This project combines artificial intelligence search algorithms and machine learning for intelligent traffic navigation. It features an interactive GUI application that visualizes Melbourne traffic scats on a map and provides optimal pathfinding with real-time traffic predictions.
 
 ## Key Features
 
-- **Interactive Map Visualization**: PyQt5-based GUI with Folium integration showing Melbourne traffic lights
+- **Interactive Map Visualization**: PyQt5-based GUI with Folium integration showing Melbourne traffic scats
 - **Multiple Search Algorithms**: Comprehensive suite of AI search algorithms
 - **Machine Learning Integration**: Deep learning models for traffic flow prediction
 - **Real-time Path Optimization**: Combines search algorithms with ML predictions for time-optimal routes
@@ -16,7 +16,7 @@ This project combines artificial intelligence search algorithms and machine lear
 ├── main.py                     # Main GUI application with interactive map
 ├── Data/                       # Traffic data and graph files
 │   ├── graph.txt              # Road network graph data
-│   ├── Traffic_Lights.geojson # Melbourne traffic lights location data
+│   ├── Traffic_Lights.geojson # Melbourne traffic scats location data
 │   └── temp_chunked_graph.txt # Temporary chunked graph for optimization
 ├── Search/                     # AI Search Algorithms Implementation
 │   ├── search_utils.py        # Main search interface and utilities
@@ -55,7 +55,7 @@ pip install PyQt5 QWebEngineWidgets folium geopandas pandas numpy matplotlib sci
    ```
 
 2. **Using the GUI**:
-   - **Origin/Destination**: Enter SITE_NO values for traffic lights
+   - **Origin/Destination**: Enter SITE_NO values for traffic scats
    - **Algorithm Selection**: Choose from 6 different search algorithms
    - **Traffic Prediction**: Enable ML-based time predictions
    - **Results**: View multiple optimal paths with costs
@@ -150,7 +150,7 @@ if prepare_traffic_based_search('2024-01-01 09:00:00', '1001', '1002'):
 
 ### Interactive Map
 - **Zoom/Pan**: Navigate Melbourne traffic network
-- **Markers**: Click traffic lights for details
+- **Markers**: Click traffic scat for details
 - **Path Visualization**: Routes highlighted in red
 - **Origin/Destination**: Color-coded start/end points
 
@@ -211,7 +211,7 @@ filtered_nodes, filtered_edges, _, _ = create_chunked_graph(
 ### Common Issues
 
 **"SITE_NO not found"**: 
-- Check that traffic light data is properly loaded
+- Check that traffic site data is properly loaded
 - Verify SITE_NO format (usually 4-digit numbers)
 
 **Search timeout**:
