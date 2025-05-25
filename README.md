@@ -33,7 +33,8 @@ This project combines artificial intelligence search algorithms and machine lear
 └── Utils/                     # General utilities
     ├── create_graph.py        # Graph creation from traffic data
     ├── filter_chunk.py        # Graph chunking for performance optimization
-    └── connect_components.py  # Graph connectivity analysis
+    ├── connect_components.py  # Graph connectivity analysis
+    └── maths.py               # Math formulas
 ```
 
 ## Getting Started
