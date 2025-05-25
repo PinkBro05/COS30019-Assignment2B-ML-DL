@@ -2,7 +2,7 @@ import matplotlib.pyplot as plt
 import csv
 import os
 
-data = os.path.join(os.path.dirname(os.path.dirname(__file__)),'model/gru loss.csv')
+data = os.path.join(os.path.dirname(__file__),'gru loss.csv')
 
 reader = csv.reader(open(data, 'r'))
 loss = []
