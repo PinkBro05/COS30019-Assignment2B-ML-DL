@@ -9,9 +9,8 @@ import torch.optim as optim
 from torch.utils.data import DataLoader, TensorDataset
 from sklearn.metrics import mean_squared_error, r2_score
 
-# Add matplotlib configuration at the top before other imports
 import matplotlib
-matplotlib.use('TkAgg')  # TkAgg works well with PyCharm
+matplotlib.use('Agg', force=True)  # Non-interactive backend, more stable for saving plots - force=True prevents other modules from overriding this
 
 # Add the parent directory to sys.path to allow imports
 current_dir = os.path.dirname(os.path.abspath(__file__))
@@ -19,33 +18,39 @@ sys.path.append(current_dir)
 
 # Now import from local directories
 from utils.data_processing import DataProcessor
-from utils.visualization import plot_predictions, plot_training_history, plot_metrics, plot_accuracy_history
+from utils.visualization import (
+    plot_training_history, 
+    plot_metrics, 
+    plot_accuracy_history,
+    plot_sequential_comparison,
+    plot_daily_comparison
+)
 from model.traffic_prediction_model import TrafficPredictionModel
 
 # Constants
-DATA_PATH = "../Data/Raw/main/Scat_Data.csv"
+# Get the absolute path from the current script's location for consistent directory structure
+DATA_PATH = os.path.join(os.path.dirname(current_dir), "Data/Transformed/2006_final_scats_data.csv")
 SEQ_LEN = 10
-EPOCHS = 50
+EPOCHS = 20
 BATCH_SIZE = 32
 DEVICE = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-MODEL_PATH = "save_models/lstm_traffic_model.pth" # Default model path
-
+MODEL_PATH = os.path.join(current_dir, "save_models/lstm_traffic_model.pth")
+SEGMENT_INDEX = 0  # date for daily comparison
+N_POINTS = 500  # Number of points for sequential comparison
 
 # Add this function to train.py
 def analyze_dataset(df):
     """Analyze key characteristics of the dataset"""
     print("\n===== Dataset Analysis =====")
     print(f"Shape: {df.shape}")
-    print(f"Date range: {df['date'].min()} to {df['date'].max()}")
-    print(f"Number of unique SCATS sites: {df['NB_SCATS_SITE'].nunique()}")
-    print(f"Day types: {df['day_type'].unique().tolist()}")
+    print(f"Date range: {df['Date'].min()} to {df['Date'].max()}")
+    print(f"Number of unique SCATS sites: {df['SCATS_Number'].nunique()}")
     print(f"Categorical columns: {[col for col in df.columns if df[col].dtype == 'object']}")
     
     # Show value distribution for traffic columns
-    v_cols = [col for col in df.columns if col.startswith('V') and '_' in col]
-    traffic_values = df[v_cols].values.flatten()
-    print(f"Traffic values - min: {np.min(traffic_values)}, max: {np.max(traffic_values)}")
-    print(f"Traffic values - mean: {np.mean(traffic_values):.2f}, std: {np.std(traffic_values):.2f}")
+    traffic_values = df['Flow'].values
+    print(f"Traffic Flow values - min: {np.min(traffic_values)}, max: {np.max(traffic_values)}")
+    print(f"Traffic Flow values - mean: {np.mean(traffic_values):.2f}, std: {np.std(traffic_values):.2f}")
 
 def build_lstm_model(input_shape, output_shape):
     """Build LSTM model architecture using custom implementation"""
@@ -59,7 +64,7 @@ def build_lstm_model(input_shape, output_shape):
 def load_model(model, model_path):
     """Load pre-trained model weights"""
     try:
-        model.load_state_dict(torch.load(model_path, map_location=DEVICE))
+        model.load_state_dict(torch.load(model_path, map_location=DEVICE, weights_only=True))
         print(f"Model loaded from {model_path}")
         return True
     except Exception as e:
@@ -165,79 +170,6 @@ def train_model(model, train_loader, val_loader, epochs, device):
         'val_accuracies': val_accuracies,
         'best_epoch': best_epoch
     }
-    """Train the PyTorch model"""
-    criterion = nn.MSELoss()
-    optimizer = optim.Adam(model.parameters())
-    scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, 'min', patience=5, factor=0.5, verbose=True)
-    
-    train_losses = []
-    val_losses = []
-    lr_history = []
-    train_accuracies = []  # Using R² as accuracy measure for regression
-    
-    for epoch in range(epochs):
-        # Training
-        model.train()
-        train_loss = 0
-        all_train_preds = []
-        all_train_targets = []
-        
-        for X_batch, y_batch in train_loader:
-            X_batch, y_batch = X_batch.to(device), y_batch.to(device)
-            
-            optimizer.zero_grad()
-            y_pred = model(X_batch)
-            loss = criterion(y_pred, y_batch)
-            loss.backward()
-            optimizer.step()
-            
-            train_loss += loss.item() * X_batch.size(0)
-            
-            # Store predictions and targets for accuracy calculation
-            all_train_preds.append(y_pred.detach().cpu().numpy())
-            all_train_targets.append(y_batch.detach().cpu().numpy())
-        
-        train_loss /= len(train_loader.dataset)
-        train_losses.append(train_loss)
-        
-        # Calculate R² as an "accuracy" metric for regression
-        all_train_preds = np.vstack(all_train_preds)
-        all_train_targets = np.vstack(all_train_targets)
-        train_r2 = r2_score(all_train_targets.flatten(), all_train_preds.flatten())
-        train_accuracies.append(train_r2)
-        
-        # Validation
-        model.eval()
-        val_loss = 0
-        with torch.no_grad():
-            for X_batch, y_batch in val_loader:
-                X_batch, y_batch = X_batch.to(device), y_batch.to(device)
-                y_pred = model(X_batch)
-                loss = criterion(y_pred, y_batch)
-                val_loss += loss.item() * X_batch.size(0)
-                
-        val_loss /= len(val_loader.dataset)
-        val_losses.append(val_loss)
-        
-        # Update learning rate scheduler
-        scheduler.step(val_loss)
-        
-        # Store current learning rate
-        current_lr = optimizer.param_groups[0]['lr']
-        lr_history.append(current_lr)
-        
-        print(f"Epoch {epoch+1}/{epochs}, Training Loss: {train_loss:.6f}, Validation Loss: {val_loss:.6f}, Training R²: {train_r2:.4f}, LR: {current_lr:.6f}")
-    
-    return {
-        'train_losses': train_losses,
-        'val_losses': val_losses,
-        'lr_history': lr_history,
-        'train_accuracies': train_accuracies
-    }
-
-
-
-# Rest of the code remains the same
 
 def prepare_data_loaders(X_train, y_train, X_test, y_test, batch_size):
     """Convert numpy arrays to PyTorch tensors and create data loaders"""
@@ -271,8 +203,8 @@ def main():
     args = parser.parse_args()
     
     # Create necessary directories
-    os.makedirs("save_models", exist_ok=True)
-    os.makedirs("plots", exist_ok=True)
+    os.makedirs(os.path.join(current_dir, "save_models"), exist_ok=True)
+    os.makedirs(os.path.join(current_dir, "plots"), exist_ok=True)
     
     # Load and preprocess data using DataProcessor class
     print("Loading data...")
@@ -310,7 +242,7 @@ def main():
             history['train_losses'], 
             history['val_losses'],
             history['lr_history'],
-            save_path="plots/training_history.png"
+            save_path= os.path.join(current_dir, "plots/training_history.png")
         )
         
         # Plot training and validation accuracy (R²)
@@ -318,7 +250,7 @@ def main():
             history['train_accuracies'],
             history['val_accuracies'],
             history['best_epoch'],
-            save_path="plots/accuracy_history.png"
+            save_path=os.path.join(current_dir, "plots/accuracy_history.png")
         )
         
         # Save model
@@ -334,22 +266,32 @@ def main():
     print("Evaluating model...")
     model.eval()
     y_pred_list = []
+    y_true_list = []
+    
     with torch.no_grad():
-        for X_batch, _ in test_loader:
+        for X_batch, y_batch in test_loader:
             X_batch = X_batch.to(DEVICE)
             y_pred = model(X_batch)
             y_pred_list.append(y_pred.cpu().numpy())
+            y_true_list.append(y_batch.numpy())
     
     y_pred = np.vstack(y_pred_list)
+    y_true = np.vstack(y_true_list)
     
-    # Plot predictions
-    plot_save_path = "plots/prediction_result.png"
-    plot_predictions(y_test, y_pred, save_path=plot_save_path)
-    print(f"Prediction plot saved to {plot_save_path}")
+    # Add sequential comparison plot
+    seq_save_path = os.path.join(current_dir, "plots/sequential_comparison.png")
+    plot_sequential_comparison(y_true.flatten(), y_pred.flatten(), n_points=N_POINTS, save_path=seq_save_path)
+    print(f"Sequential comparison plot saved to {seq_save_path}")
+    
+    # Add daily comparison plot (if applicable)
+    if len(y_true) >= 96:  # At least one day of data (assuming 15-min intervals)
+        daily_save_path = os.path.join(current_dir, "plots/daily_comparison.png")
+        plot_daily_comparison(y_true.flatten(), y_pred.flatten(), segment_index=SEGMENT_INDEX, tick_interval=4, save_path=daily_save_path)
+        print(f"Daily comparison plot saved to {daily_save_path}")
     
     # Plot performance metrics
-    metrics_save_path = "plots/performance_metrics.png"
-    metrics = plot_metrics(y_test, y_pred, save_path=metrics_save_path)
+    metrics_save_path = os.path.join(current_dir, "plots/performance_metrics.png")
+    metrics = plot_metrics(y_true, y_pred, save_path=metrics_save_path)
     print(f"Performance metrics plot saved to {metrics_save_path}")
     print(f"Model performance: MSE={metrics['MSE']:.6f}, RMSE={metrics['RMSE']:.6f}, MAE={metrics['MAE']:.6f}, R²={metrics['R2']:.6f}")
 

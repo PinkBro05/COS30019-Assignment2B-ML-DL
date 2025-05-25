@@ -119,3 +119,51 @@ class BfsNetwork(SearchNetwork):
     def find_path(self, start, goal, debug=False):
         """Implementation of the abstract method using BFS with optional debugging"""
         return self.bfs_path(start, goal, debug)
+    
+    def find_k_paths(self, start, goal, k=5):
+        """
+        Find k shortest paths using a modified BFS approach.
+        """
+        if start not in self.graph or goal not in self.graph:
+            return []
+        
+        # Priority queue: (cost, path)
+        paths = []
+        queue = deque([(0, [start])])
+        visited_paths = set()
+        
+        # Add iteration counter
+        iterations = 0
+        
+        while queue and len(paths) < k:
+            # Increment iteration counter
+            iterations += 1
+            
+            current_cost, current_path = queue.popleft()
+            current_node = current_path[-1]
+            
+            # Convert path to tuple for hashing
+            path_tuple = tuple(current_path)
+            if path_tuple in visited_paths:
+                continue
+            visited_paths.add(path_tuple)
+            
+            if current_node == goal:
+                paths.append((current_path.copy(), current_cost))
+                continue
+            
+            # Explore neighbors using the correct method
+            for neighbor in self.neighbors(current_node):
+                if neighbor not in current_path:  # Avoid cycles
+                    edge_data = self.get_edge_data(current_node, neighbor)
+                    weight = edge_data.get('weight', 1)
+                    new_path = current_path + [neighbor]
+                    new_cost = current_cost + weight
+                    queue.append((new_cost, new_path))
+        
+        # Print some debug info about the number of iterations
+        print(f"Explored {iterations} paths, found {len(paths)} unique paths to goal")
+        
+        # Sort paths by cost
+        paths.sort(key=lambda x: x[1])
+        return paths[:k]

@@ -126,3 +126,86 @@ class DijkstraNetwork(SearchNetwork):
     def find_path(self, start, goal, debug=False):
         """Implementation of the abstract method using Dijkstra's algorithm with optional debugging"""
         return self.dijkstra(start, goal, debug)
+    
+    def find_k_paths(self, start, goal, k=5):
+        """
+        Find k shortest paths from start to goal using Dijkstra's algorithm.
+        
+        Parameters:
+            start: Starting node
+            goal: Goal node
+            k: Number of paths to find (default: 5)
+            
+        Returns:
+            list: List of tuples (path, cost) sorted by cost
+        """
+        if start not in self.graph or goal not in self.graph:
+            return []
+            
+        # List to store completed paths
+        paths = []
+        visited = set()
+        counter = count()  # tie-breaker for insertion order
+        
+        # Priority queue: (cost, counter, node, path)
+        heap = [(0, next(counter), start, [start])]
+        
+        # Add iteration counter
+        iterations = 0
+        
+        while heap and len(paths) < k:
+            # Increment iteration counter
+            iterations += 1
+            
+            cost, _, current, path = heapq.heappop(heap)
+            
+            # If we've reached the goal, add to paths
+            if current == goal:
+                paths.append((path, cost))
+                continue
+                
+            # Skip if we've already visited this node
+            if current in visited:
+                continue
+                
+            visited.add(current)
+            
+            # Get neighbors with their edge weights
+            for neighbor in self.neighbors(current):
+                if neighbor not in path:  # Avoid cycles
+                    edge_data = self.get_edge_data(current, neighbor)
+                    edge_weight = edge_data.get('weight', 1)
+                    new_cost = cost + edge_weight
+                    new_path = path + [neighbor]
+                    
+                    heapq.heappush(heap, (new_cost, next(counter), neighbor, new_path))
+        
+        # Print some debug info about the number of iterations
+        print(f"Explored {iterations} paths, found {len(paths)} unique paths to goal")
+        
+        # Sort paths by cost (should already be sorted, but just to be safe)
+        paths.sort(key=lambda x: x[1])
+        return paths[:k]
+    
+    def find_k_shortest_paths_to_destinations(self, origin, destinations, k=5):
+        """
+        Find the k shortest paths from origin to any of the destinations.
+        
+        Parameters:
+            origin: Starting node
+            destinations: List of possible target nodes
+            k: Number of paths to find (default: 5)
+            
+        Returns:
+            list: List of tuples (path, destination, cost) sorted by cost
+        """
+        all_paths = []
+        
+        for dest in destinations:
+            paths = self.find_k_paths(origin, dest, k)
+            for path, cost in paths:
+                all_paths.append((path, dest, cost))
+                
+        # Sort all paths by cost and return top k
+        all_paths.sort(key=lambda x: x[2])  # Sort by cost
+        return all_paths[:k]
