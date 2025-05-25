@@ -36,7 +36,7 @@ class SearchNetwork(Network):
             self.add_edge(src, tgt, weight=weight)
             
         return self  # Return self for method chaining
-    
+
     @abstractmethod
     def find_path(self, start, goal):
         """
@@ -66,3 +66,42 @@ class SearchNetwork(Network):
                 shortest_dest = dest
                 
         return shortest_path, shortest_dest, shortest_weight
+    
+    def find_k_shortest_paths_to_destinations(self, origin, destinations, k=5):
+        """
+        Find the k shortest paths from origin to any of the destinations.
+        
+        Parameters:
+            origin: starting node
+            destinations: list of destination nodes
+            k: number of shortest paths to find (default: 5)
+        
+        Returns:
+            list: List of tuples (path, destination, weight) sorted by weight
+        """
+        all_paths = []
+        
+        for dest in destinations:
+            paths = self.find_k_paths(origin, dest, k)
+            for path, weight in paths:
+                if path:
+                    all_paths.append((path, dest, weight))
+        
+        # Sort all paths by weight and return top k
+        all_paths.sort(key=lambda x: x[2])  # Sort by weight
+        return all_paths[:k]
+
+    @abstractmethod
+    def find_k_paths(self, start, goal, k=5):
+        """
+        Find k shortest paths from start to goal node.
+        
+        Parameters:
+            start: starting node
+            goal: goal node
+            k: number of paths to find
+        
+        Returns:
+            list: List of tuples (path, weight) sorted by weight
+        """
+        pass
