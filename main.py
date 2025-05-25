@@ -442,31 +442,36 @@ class MainWindow(QMainWindow):
         
         # Determine if we need to show both time and distance
         is_time_based = hasattr(self, 'current_cost_type') and 'time' in self.current_cost_type
-        
-        # Update columns based on cost type
+          # Update columns based on cost type
         if is_time_based:
             # Show both time and distance columns when using traffic prediction
-            self.results_table.setColumnCount(4)
-            self.results_table.setHorizontalHeaderLabels(["Path", "Time", "Distance (m)", "Show"])
-            self.results_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.Stretch)
-            self.results_table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeToContents)
+            self.results_table.setColumnCount(5)
+            self.results_table.setHorizontalHeaderLabels(["Rank", "Path", "Time", "Distance (m)", "Show"])
+            self.results_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeToContents)
+            self.results_table.horizontalHeader().setSectionResizeMode(1, QHeaderView.Stretch)
             self.results_table.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeToContents)
             self.results_table.horizontalHeader().setSectionResizeMode(3, QHeaderView.ResizeToContents)
+            self.results_table.horizontalHeader().setSectionResizeMode(4, QHeaderView.ResizeToContents)
         else:
-            # Use original 3-column layout for distance-only results
-            self.results_table.setColumnCount(3)
-            self.results_table.setHorizontalHeaderLabels(["Path", "Distance (m)", "Show"])
-            self.results_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.Stretch)
-            self.results_table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeToContents)
+            # Use 4-column layout for distance-only results with rank
+            self.results_table.setColumnCount(4)
+            self.results_table.setHorizontalHeaderLabels(["Rank", "Path", "Distance (m)", "Show"])
+            self.results_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeToContents)
+            self.results_table.horizontalHeader().setSectionResizeMode(1, QHeaderView.Stretch)
             self.results_table.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeToContents)
-        
-        # Add new results
+            self.results_table.horizontalHeader().setSectionResizeMode(3, QHeaderView.ResizeToContents)
+          # Add new results
         for i, (path, cost) in enumerate(paths):
             self.results_table.insertRow(i)
             
-            # Path
+            # Rank (column 0)
+            rank_item = QTableWidgetItem(str(i + 1))
+            rank_item.setTextAlignment(QtCore.Qt.AlignCenter)
+            self.results_table.setItem(i, 0, rank_item)
+            
+            # Path (column 1)
             path_str = " → ".join(path)
-            self.results_table.setItem(i, 0, QTableWidgetItem(path_str))
+            self.results_table.setItem(i, 1, QTableWidgetItem(path_str))
             
             # Calculate path distance if we're in time-based mode
             # This is done by estimating from the path nodes using straight-line distances
@@ -499,30 +504,30 @@ class MainWindow(QMainWindow):
                 seconds = int(cost) % 60
                 time_display = f"{minutes} min {seconds} sec"
                 
-                # Add time display
+                # Add time display (column 2)
                 time_item = QTableWidgetItem(time_display)
                 time_item.setTextAlignment(QtCore.Qt.AlignRight | QtCore.Qt.AlignVCenter)
-                self.results_table.setItem(i, 1, time_item)
+                self.results_table.setItem(i, 2, time_item)
                 
-                # Add distance display
+                # Add distance display (column 3)
                 distance_item = QTableWidgetItem(f"{int(path_distance)}")
+                distance_item.setTextAlignment(QtCore.Qt.AlignRight | QtCore.Qt.AlignVCenter)
+                self.results_table.setItem(i, 3, distance_item)
+                
+                # Show button (column 4)
+                show_button = QPushButton("Show on Map")
+                show_button.clicked.connect(lambda checked, p=path, c=cost: self.show_path_on_map(p))
+                self.results_table.setCellWidget(i, 4, show_button)
+            else:
+                # For distance-only mode, show the distance in meters (column 2)
+                distance_item = QTableWidgetItem(f"{int(cost)}")
                 distance_item.setTextAlignment(QtCore.Qt.AlignRight | QtCore.Qt.AlignVCenter)
                 self.results_table.setItem(i, 2, distance_item)
                 
-                # Show button in column 3
+                # Show button (column 3)
                 show_button = QPushButton("Show on Map")
                 show_button.clicked.connect(lambda checked, p=path, c=cost: self.show_path_on_map(p))
                 self.results_table.setCellWidget(i, 3, show_button)
-            else:
-                # For distance-only mode, just show the distance in meters (column 1)
-                distance_item = QTableWidgetItem(f"{int(cost)}")
-                distance_item.setTextAlignment(QtCore.Qt.AlignRight | QtCore.Qt.AlignVCenter)
-                self.results_table.setItem(i, 1, distance_item)
-                
-                # Show button in column 2
-                show_button = QPushButton("Show on Map")
-                show_button.clicked.connect(lambda checked, p=path, c=cost: self.show_path_on_map(p))
-                self.results_table.setCellWidget(i, 2, show_button)
     
     def show_path_on_map(self, path):
         # Retrieve coordinates for each site in the path

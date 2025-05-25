@@ -244,7 +244,7 @@ def main():
     melbourne_gdf = filter_to_melbourne(scats_gdf)
     
     # Create graph directly from SCATS sites
-    scats_graph, edge_distances = create_scats_graph(melbourne_gdf, max_distance_km=1.5)
+    scats_graph, edge_distances = create_scats_graph(melbourne_gdf, max_distance_km=2)
     
     # Connect disconnected components if needed
     if not nx.is_connected(scats_graph):

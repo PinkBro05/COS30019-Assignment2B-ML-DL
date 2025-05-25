@@ -170,6 +170,9 @@ class ACO:
                             self.best_path = path
                             return 0
                         
+                        # Add path to best paths list if it's good enough
+                        self._add_to_best_paths(path, path_cost)
+                        
                         if path_cost <= self.best_path_cost:
                             self.best_path = path
                             self.best_path_cost = path_cost
@@ -181,7 +184,7 @@ class ACO:
         
         return iteration_best_path_cost
             
-    def _deploy_backward_search_ants(self, iteration, iteration_best_path_cost) -> (float, float):
+    def _deploy_backward_search_ants(self, iteration, iteration_best_path_cost):
         for ant in self.search_ants:
             if ant.is_fit and ant.path_cost <= iteration_best_path_cost:
                 # Max Min Ant System (MMAS) pheromone update
@@ -282,10 +285,12 @@ class ACO:
         elif self.mode == 0:
             if all(dest not in self.graph.nodes() for dest in destination):
                 raise ValueError(f"Destination nodes {destination} cannot access in graph")
-            
-        # Reset best path and cost
+              # Reset best path and cost
         self.best_path = []
         self.best_path_cost = float("inf")
+        
+        # Track multiple best paths for top-k results
+        self.best_paths = []  # List of (path, cost) tuples
         
         # Do the actual search
         self._deploy_search_ants(
@@ -310,7 +315,7 @@ class ACO:
                     self.best_path.append(self.best_path[0])
 
             
-        return self.best_path, self.best_path_cost
+        return self.best_path, self.best_path_cost, self.get_top_k_paths(5)
     
     def _apply_2opt_local_search(self, path):
         """Applies 2-opt local search to improve a path.
@@ -370,3 +375,36 @@ class ACO:
             u, v = path[i], path[i + 1]
             cost += self.graph_api.get_edge_cost(u, v)
         return cost
+    
+    def _add_to_best_paths(self, path, cost, max_paths=10):
+        """Add a path to the best paths list, maintaining a sorted list of top paths.
+        
+        Args:
+            path: List of nodes representing the path
+            cost: Cost of the path
+            max_paths: Maximum number of paths to keep
+        """
+        # Check if this path is already in the list (avoid duplicates)
+        path_tuple = tuple(path)
+        for existing_path, existing_cost in self.best_paths:
+            if tuple(existing_path) == path_tuple:
+                return  # Path already exists, skip
+        
+        # Add the new path
+        self.best_paths.append((path.copy(), cost))
+        
+        # Sort by cost and keep only the best paths
+        self.best_paths.sort(key=lambda x: x[1])
+        if len(self.best_paths) > max_paths:
+            self.best_paths = self.best_paths[:max_paths]
+    
+    def get_top_k_paths(self, k=5):
+        """Get the top k best paths found by the algorithm.
+        
+        Args:
+            k: Number of top paths to return
+            
+        Returns:
+            List of (path, cost) tuples representing the top k paths
+        """
+        return self.best_paths[:k]

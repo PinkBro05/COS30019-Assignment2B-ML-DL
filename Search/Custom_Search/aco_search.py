@@ -87,19 +87,30 @@ def run_aco(graph_file_path, origin, destination, top_k=1):
             local_search_frequency=local_search_frequency,
             num_threads=num_threads
         )
-        
-        # Find shortest path using ACO
-        aco_path, aco_cost = aco.find_shortest_path(
+          # Find shortest path using ACO
+        aco_result = aco.find_shortest_path(
             source=origin,
             destination=destination,
             num_ants=num_ants,
         )
         
-        # Return the result as a list of tuples (path, cost)
-        if aco_path and aco_cost > 0:
-            return [(aco_path, aco_cost)]
+        # Handle the new return format (best_path, best_cost, top_k_paths)
+        if len(aco_result) == 3:
+            aco_path, aco_cost, top_k_paths = aco_result
+            # Return the top k paths, ensuring we have at least the best path
+            if top_k_paths and len(top_k_paths) > 0:
+                # Limit to requested top_k
+                result_paths = top_k_paths[:top_k] if top_k <= len(top_k_paths) else top_k_paths
+                return result_paths
+            elif aco_path and aco_cost > 0:
+                return [(aco_path, aco_cost)]
         else:
-            return []
+            # Fallback for older return format
+            aco_path, aco_cost = aco_result
+            if aco_path and aco_cost > 0:
+                return [(aco_path, aco_cost)]
+        
+        return []
             
     except Exception as e:
         print(f"Error running ACO algorithm: {e}")
