@@ -78,7 +78,7 @@ pip install PyQt5 QWebEngineWidgets folium geopandas pandas numpy matplotlib sci
 
 The system includes three deep learning models for traffic flow prediction:
 
-1. **Transformer Model** (Primary)
+1. **Transformer Model** 
    - Attention-based architecture for sequence prediction
    
 2. **LSTM Model**
