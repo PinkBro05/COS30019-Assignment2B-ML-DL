@@ -13,13 +13,8 @@ class DataProcessor:
     def load_data(self):
         df = pd.read_csv(self.data_path)
         
-        # Convert date to datetime
-        df['date'] = pd.to_datetime(df['date'])
-        
-        # One-hot encode categorical columns
-        if 'day_type' in df.columns:
-            day_dummies = pd.get_dummies(df['day_type'], prefix='day')
-            df = pd.concat([df, day_dummies], axis=1)
+        # Convert Date to datetime
+        df['Date'] = pd.to_datetime(df['Date'])
             
         if 'scat_type' in df.columns:
             scat_dummies = pd.get_dummies(df['scat_type'], prefix='scat')
@@ -27,22 +22,81 @@ class DataProcessor:
         
         return df
 
-    def create_sequences(self, data):
+    def create_sequences(self, data, sequence_length=None):
         """Convert to supervised learning format"""
+        if sequence_length is None:
+            sequence_length = self.sequence_length
+        
         xs, ys = [], []
-        for i in range(len(data) - self.sequence_length):
-            x = data[i:(i + self.sequence_length)]
-            y = data[i + self.sequence_length]
+        for i in range(len(data) - sequence_length):
+            x = data[i:(i + sequence_length)]
+            y = data[i + sequence_length]
             xs.append(x)
             ys.append(y)
         return np.array(xs), np.array(ys)
 
-    def scale_and_split_data(self):
+    def scale_and_split_data(self, train_ratio=0.8, sequence_length=10):
+        """
+        Process SCATS traffic data, scale features, create sequences and split into train/test sets
+        
+        Args:
+            train_ratio: Ratio of data to use for training (default 0.8)
+            sequence_length: Length of input sequences for LSTM (default 10)
+        
+        Returns:
+            X_train, X_test, y_train, y_test: Processed data ready for LSTM model
+        """
+        # Load the data
         df = self.load_data()
         
-        # Extract traffic volume columns (V00_0 to V95_0)
-        feature_cols = [col for col in df.columns if col.startswith('V') and '_' in col]
+        # Handle Date column if needed (commented in basic_new_data.ipynb)
+        if 'Date' in df.columns:
+            df['Date'] = pd.to_datetime(df['Date'])
         
-        # Include categorical features (one-hot encoded columns)
-        categorical_cols = [col for col in df.columns if col.startswith('day_') or col.startswith('scat_')]
-        feature_cols.extend(categorical_cols)
+        # Select features based on available columns
+        if 'Flow' in df.columns:
+            # Use Flow column directly as in basic_new_data.ipynb
+            feature_data = df[['Flow']].values
+        else:
+            # Use traffic volume columns if available (V00_0 to V95_0)
+            feature_cols = [col for col in df.columns if col.startswith('V') and '_' in col]
+            
+            # Include categorical features if needed
+            categorical_cols = [col for col in df.columns if col.startswith('day_') or col.startswith('scat_')]
+            if categorical_cols:
+                feature_cols.extend(categorical_cols)
+                
+            # If no specific features found, use all numeric columns
+            if not feature_cols:
+                feature_cols = df.select_dtypes(include=[np.number]).columns.tolist()
+                
+            feature_data = df[feature_cols].values
+        
+        # Scale the features
+        scaled_data = self.scaler.fit_transform(feature_data)
+        
+        # Create sequences for LSTM
+        X, y = self.create_sequences(scaled_data, self.sequence_length)
+        
+        # Split into train/test sets
+        split_idx = int(train_ratio * len(X))
+        X_train, y_train = X[:split_idx], y[:split_idx]
+        X_test, y_test = X[split_idx:], y[split_idx:]
+        
+        return X_train, X_test, y_train, y_test
+
+    def inverse_transform(self, data):
+        """
+        Transform scaled data back to original scale
+        
+        Args:
+            data: Scaled data to transform back
+        
+        Returns:
+            Data in original scale
+        """
+        # Reshape if needed
+        if len(data.shape) == 2 and data.shape[1] == 1:
+            return self.scaler.inverse_transform(data)
+        else:
+            return self.scaler.inverse_transform(data.reshape(-1, 1))
