@@ -372,8 +372,6 @@ class MainWindow(QMainWindow):
                     selected_model = "lstm"
                 elif "GRU" in model_text:
                     selected_model = "gru"
-                elif "Ensemble" in model_text:
-                    selected_model = "ensemble"
                 
                 print(f"Using prediction model: {selected_model}")
                 traffic_data = get_traffic_predictions(start_time, origin, destination, model_type=selected_model)
@@ -640,7 +638,7 @@ def get_traffic_predictions(start_time, origin, destination, model_type="transfo
         start_time (str): Start time for prediction in format 'YYYY-MM-DD HH:MM:SS'
         origin (str): Origin node ID
         destination (str): Destination node ID
-        model_type (str): Type of model to use ('transformer', 'lstm', 'gru', 'ensemble')
+        model_type (str): Type of model to use ('transformer', 'lstm', 'gru')
         
     Returns:
         dict: Dictionary containing prediction results with keys:
@@ -678,24 +676,6 @@ def get_traffic_predictions(start_time, origin, destination, model_type="transfo
             # Placeholder for GRU model integration
             print("GRU model integration - placeholder implementation")
             # TODO: Implement GRU prediction integration
-            updated_graph_path = prepare_traffic_based_search(
-                origin, destination, start_time, 
-                chunked_graph_path=chunked_graph_path, 
-                output_path=output_path
-            )
-        elif model_type == "ensemble":
-            # Placeholder for Ensemble model integration
-            print("Ensemble model integration - placeholder implementation")
-            # TODO: Implement ensemble prediction (average of all models)
-            updated_graph_path = prepare_traffic_based_search(
-                origin, destination, start_time, 
-                chunked_graph_path=chunked_graph_path, 
-                output_path=output_path
-            )
-        else:
-            # Fallback to transformer for unknown model types
-            print(f"Unknown model type '{model_type}', falling back to transformer")
-            model_type = "transformer"
             updated_graph_path = prepare_traffic_based_search(
                 origin, destination, start_time, 
                 chunked_graph_path=chunked_graph_path, 
