@@ -3,7 +3,7 @@ import os
 
 fields = ['Time', 'Flow', 'Points', 'Observed']
 
-data = os.path.expanduser('~/AI/COS30019-Assignment2B-ML-DL/Data/Raw/main/Scat_Data.csv')
+data = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))),'Data/Raw/main/Scat_Data.csv')
 
 output = os.path.join(os.path.dirname(__file__),'TrainingDataAdaptedOutput.csv')
 
@@ -40,7 +40,7 @@ for row in reader:
 fid = open(output, "r")
 li = fid.readlines()
 
-test_data_size = 72000
+test_data_size = 195000
 row_count = len(li)
 
 header = "15 Minutes,Lane 1 Flow (Veh/15 Minutes),# Lane Points,% Observed,SCATS\n"
