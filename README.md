@@ -165,7 +165,7 @@ if prepare_traffic_based_search('2024-01-01 09:00:00', '1001', '1002'):
 - **Real-time Input Validation**: Checks for valid SITE_NO values
 - **Algorithm Comparison**: Switch between algorithms to compare results
 - **Traffic Prediction Toggle**: Enable/disable ML-based time predictions
-- **Model Selection**: Choose between Transformer, LSTM, GRU, or Ensemble models
+- **Model Selection**: Choose between Transformer, LSTM, GRU
 - **Smart UI**: Model selection automatically enabled/disabled based on traffic prediction toggle
 - **Cost Display**: Shows both distance and time costs
 - **Results Table**: Multiple paths ranked by optimality
