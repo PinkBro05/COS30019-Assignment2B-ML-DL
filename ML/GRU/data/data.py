@@ -9,6 +9,7 @@ Return the processed X (input) and y (output) sets for both training and testing
 import numpy as np
 import pandas as pd
 from sklearn.preprocessing import StandardScaler, MinMaxScaler
+import datetime
 
 
 def process_data(train, test, lags):
@@ -38,9 +39,6 @@ def process_data(train, test, lags):
     # applies scaler to both train and test data and reshape into 1D array
     flow1 = scaler.transform(df1[attr].values.reshape(-1, 1)).reshape(1, -1)[0]
     flow2 = scaler.transform(df2[attr].values.reshape(-1, 1)).reshape(1, -1)[0]
-
-    print('flow1:', flow1)
-    print('flow2:', flow2)
 
     train, test = [], []
     for i in range(lags, len(flow1)):
