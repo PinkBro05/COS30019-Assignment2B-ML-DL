@@ -41,6 +41,7 @@ def connect_components(scats_graph, edge_distances, max_fallback_distance=5, for
         if nx.is_connected(scats_graph):
             print("Successfully connected graph after first attempt")
         return scats_graph, edge_distances
+    
     # Second attempt: Try with a more flexible distance constraint
     relaxed_distance = max_fallback_distance * 2
     print(f"Attempt 2: Graph still disconnected, trying with increased distance ({relaxed_distance} km)...")

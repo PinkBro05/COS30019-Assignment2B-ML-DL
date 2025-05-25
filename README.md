@@ -76,7 +76,7 @@ pip install PyQt5 QWebEngineWidgets folium geopandas pandas numpy matplotlib sci
 
 ### Traffic Flow Prediction
 
-The system includes three deep learning models for traffic flow prediction:
+The system includes 3 prediction options for traffic flow forecasting:
 
 1. **Transformer Model** 
    - Attention-based architecture for sequence prediction
@@ -87,12 +87,17 @@ The system includes three deep learning models for traffic flow prediction:
 3. **GRU Model**
    - Gated Recurrent Units for efficient processing
 
+
 ### Using ML Predictions
 
 1. **Enable Traffic Predictions**: Check the "Use Traffic Flow Predictions" checkbox
-2. **Set Time**: Choose the start time for prediction
-3. **Run Search**: The system will:
-   - Use ML models to predict traffic flow
+2. **Select Prediction Model**: Choose from the dropdown:
+   - **Transformer (Default)**: Best overall performance
+   - **LSTM (Neural Network)**: Good for temporal patterns
+   - **GRU (Gated Recurrent)**: Fast and efficient
+3. **Set Time**: Choose the start time for prediction
+4. **Run Search**: The system will:
+   - Use the selected ML model to predict traffic flow
    - Convert predictions to time-based edge costs
    - Find time-optimal paths instead of distance-optimal
 
@@ -113,7 +118,9 @@ python Transformer/supervised_learning.py --data_file Data/Transformed/2024_fina
 1. Launch the application: `python main.py`
 2. Enter origin and destination SITE_NO values
 3. Select algorithm from dropdown
-4. Optionally enable traffic predictions
+4. Optionally enable traffic predictions:
+   - Check "Use Traffic Flow Predictions" checkbox
+   - Select your preferred ML model from the dropdown
 5. Click "Find Paths" to see results
 
 ### Programmatic Usage
@@ -157,6 +164,9 @@ if prepare_traffic_based_search('2024-01-01 09:00:00', '1001', '1002'):
 ### Search Panel
 - **Real-time Input Validation**: Checks for valid SITE_NO values
 - **Algorithm Comparison**: Switch between algorithms to compare results
+- **Traffic Prediction Toggle**: Enable/disable ML-based time predictions
+- **Model Selection**: Choose between Transformer, LSTM, GRU, or Ensemble models
+- **Smart UI**: Model selection automatically enabled/disabled based on traffic prediction toggle
 - **Cost Display**: Shows both distance and time costs
 - **Results Table**: Multiple paths ranked by optimality
 

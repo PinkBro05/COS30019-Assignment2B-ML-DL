@@ -190,7 +190,8 @@ def create_chunked_graph(graph_file_path: str,
     
     # Parse the original graph
     nodes, edges, _, _ = parse_graph_file(graph_file_path, origin_id, {destination_id})
-      # Filter nodes by chunk
+    
+    # Filter nodes by chunk
     valid_nodes = filter_nodes_by_chunk(nodes, origin_id, destination_id, margin_factor)
     
     # Filter edges to include all connections to nodes in the bounding box
@@ -200,7 +201,8 @@ def create_chunked_graph(graph_file_path: str,
     for (node1, node2), _ in filtered_edges.items():
         valid_nodes.add(node1)
         valid_nodes.add(node2)
-      # Create filtered nodes dictionary with all needed nodes
+    
+    # Create filtered nodes dictionary with all needed nodes
     filtered_nodes = {node_id: coords for node_id, coords in nodes.items() 
                      if node_id in valid_nodes}
     
@@ -314,7 +316,8 @@ if __name__ == "__main__":
         filtered_nodes, filtered_edges, origin_id, dest_ids = create_chunked_graph(
             graph_file, origin, destination, margin_factor=0.2
         )
-          # Get statistics using dynamic import
+        
+        # Get statistics using dynamic import
         search_dir = os.path.join('..', 'Search')
         parser_path = os.path.join(search_dir, 'data_reader', 'parser.py')
         

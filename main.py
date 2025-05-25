@@ -11,7 +11,7 @@ import geopandas as gpd
 import folium
 from folium.plugins import MarkerCluster, Search
 from PyQt5 import QtWidgets, QtCore, QtWebEngineWidgets
-from PyQt5.QtWidgets import  QMainWindow, QVBoxLayout, QHBoxLayout, QWidget, QLabel, QLineEdit, QPushButton, QComboBox, QGroupBox, QTableWidget, QTableWidgetItem, QHeaderView, QCheckBox, QSlider, QDateTimeEdit
+from PyQt5.QtWidgets import  QMainWindow, QVBoxLayout, QHBoxLayout, QWidget, QLabel, QLineEdit, QPushButton, QComboBox, QGroupBox, QTableWidget, QTableWidgetItem, QHeaderView, QCheckBox, QDateTimeEdit
 from PyQt5.QtCore import QDateTime
 import traceback
 
@@ -90,7 +90,8 @@ def create_map(gdf, center=None):
     if center is None:
         # Set center to CBD Melbourne
         center = [-37.8136, 144.9631]  # Melbourne CBD coordinates
-      # Create a map centered on Melbourne with appropriate zoom
+    
+    # Create a map centered on Melbourne with appropriate zoom
     m = folium.Map(
         location=center,
         zoom_start=12,  # Increased zoom level for Melbourne
@@ -249,13 +250,29 @@ class MainWindow(QMainWindow):
         self.time_input.setCalendarPopup(True)
         time_layout.addWidget(time_label)
         time_layout.addWidget(self.time_input)
-        
         # Use traffic prediction checkbox
         traffic_layout = QHBoxLayout()
         self.use_traffic_checkbox = QCheckBox("Use Traffic Flow Predictions")
         self.use_traffic_checkbox.setChecked(False)
         self.use_traffic_checkbox.setToolTip("Enable to use ML-predicted traffic flow for time-based costs")
         traffic_layout.addWidget(self.use_traffic_checkbox)
+        
+        # Traffic prediction model selection
+        model_layout = QHBoxLayout()
+        model_label = QLabel("Prediction Model:")
+        self.model_combo = QComboBox()
+        self.model_combo.addItems([
+            "Transformer (Default)",
+            "LSTM (Neural Network)",
+            "GRU (Gated Recurrent)",
+        ])
+        self.model_combo.setEnabled(False)  # Initially disabled
+        self.model_combo.setToolTip("Select which ML model to use for traffic flow prediction")
+        model_layout.addWidget(model_label)
+        model_layout.addWidget(self.model_combo)
+        
+        # Connect checkbox to enable/disable model selection
+        self.use_traffic_checkbox.toggled.connect(self.model_combo.setEnabled)
         
         # Algorithm selection
         algo_layout = QHBoxLayout()
@@ -281,6 +298,7 @@ class MainWindow(QMainWindow):
         input_layout.addLayout(dest_layout)
         input_layout.addLayout(time_layout)
         input_layout.addLayout(traffic_layout)
+        input_layout.addLayout(model_layout)
         input_layout.addLayout(algo_layout)
         input_layout.addWidget(search_button)
         
@@ -345,9 +363,22 @@ class MainWindow(QMainWindow):
         if use_traffic:
             try:
                 print(f"Getting traffic predictions for time: {start_time}")
-                traffic_data = get_traffic_predictions(start_time, origin, destination)
+                
+                # Get selected prediction model
+                model_text = self.model_combo.currentText()
+                selected_model = "transformer"  # Default
+                if "LSTM" in model_text:
+                    selected_model = "lstm"
+                elif "GRU" in model_text:
+                    selected_model = "gru"
+                elif "Ensemble" in model_text:
+                    selected_model = "ensemble"
+                
+                print(f"Using prediction model: {selected_model}")
+                traffic_data = get_traffic_predictions(start_time, origin, destination, model_type=selected_model)
+                
                 if traffic_data['status'] == 'success':
-                    print(f"Successfully obtained traffic predictions for {len(traffic_data['time_costs'])} edges")
+                    print(f"Successfully obtained traffic predictions for {len(traffic_data['time_costs'])} edges using {selected_model} model")
                 else:
                     print(f"Traffic prediction failed: {traffic_data.get('error', 'Unknown error')}")
                     QtWidgets.QMessageBox.warning(
@@ -435,6 +466,7 @@ class MainWindow(QMainWindow):
                 f"An error occurred while searching for paths: {str(e)}"
             )
             self.statusBar().showMessage("Search failed.")
+    
     def display_results(self, paths):
         """Display search results in the table"""
         # Clear previous results
@@ -442,7 +474,8 @@ class MainWindow(QMainWindow):
         
         # Determine if we need to show both time and distance
         is_time_based = hasattr(self, 'current_cost_type') and 'time' in self.current_cost_type
-          # Update columns based on cost type
+        
+        # Update columns based on cost type
         if is_time_based:
             # Show both time and distance columns when using traffic prediction
             self.results_table.setColumnCount(5)
@@ -460,7 +493,8 @@ class MainWindow(QMainWindow):
             self.results_table.horizontalHeader().setSectionResizeMode(1, QHeaderView.Stretch)
             self.results_table.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeToContents)
             self.results_table.horizontalHeader().setSectionResizeMode(3, QHeaderView.ResizeToContents)
-          # Add new results
+
+        # Add new results
         for i, (path, cost) in enumerate(paths):
             self.results_table.insertRow(i)
             
@@ -597,7 +631,7 @@ class MainWindow(QMainWindow):
         print(f"Applied time-based costs to {applied_count} out of {len(edges)} edges")
         return modified_edges
 
-def get_traffic_predictions(start_time, origin, destination):
+def get_traffic_predictions(start_time, origin, destination, model_type="transformer"):
     """
     Get traffic predictions for a specified start time, origin and destination.
     
@@ -605,24 +639,67 @@ def get_traffic_predictions(start_time, origin, destination):
         start_time (str): Start time for prediction in format 'YYYY-MM-DD HH:MM:SS'
         origin (str): Origin node ID
         destination (str): Destination node ID
+        model_type (str): Type of model to use ('transformer', 'lstm', 'gru', 'ensemble')
         
     Returns:
         dict: Dictionary containing prediction results with keys:
             - status: 'success' or 'error'
             - time_costs: Dictionary mapping edge tuples to travel time costs (if successful)
             - error: Error message (if failed)
+            - model_used: Which model was actually used
     """
     try:
         # Create temporary chunked graph file path
         chunked_graph_path = os.path.join('Data', 'temp_chunked_graph.txt')
         output_path = os.path.join('Data', 'traffic_graph.txt')
         
-        # Prepare graph with traffic predictions
-        updated_graph_path = prepare_traffic_based_search(
-            origin, destination, start_time, 
-            chunked_graph_path=chunked_graph_path, 
-            output_path=output_path
-        )
+        # Log the model being used
+        print(f"Initializing {model_type} model for traffic prediction...")
+        
+        # Prepare graph with traffic predictions based on selected model
+        if model_type == "transformer":
+            # Use existing transformer implementation
+            updated_graph_path = prepare_traffic_based_search(
+                origin, destination, start_time, 
+                chunked_graph_path=chunked_graph_path, 
+                output_path=output_path
+            )
+        elif model_type == "lstm":
+            # Placeholder for LSTM model integration
+            print("LSTM model integration - placeholder implementation")
+            # TODO: Implement LSTM prediction integration
+            updated_graph_path = prepare_traffic_based_search(
+                origin, destination, start_time, 
+                chunked_graph_path=chunked_graph_path, 
+                output_path=output_path
+            )
+        elif model_type == "gru":
+            # Placeholder for GRU model integration
+            print("GRU model integration - placeholder implementation")
+            # TODO: Implement GRU prediction integration
+            updated_graph_path = prepare_traffic_based_search(
+                origin, destination, start_time, 
+                chunked_graph_path=chunked_graph_path, 
+                output_path=output_path
+            )
+        elif model_type == "ensemble":
+            # Placeholder for Ensemble model integration
+            print("Ensemble model integration - placeholder implementation")
+            # TODO: Implement ensemble prediction (average of all models)
+            updated_graph_path = prepare_traffic_based_search(
+                origin, destination, start_time, 
+                chunked_graph_path=chunked_graph_path, 
+                output_path=output_path
+            )
+        else:
+            # Fallback to transformer for unknown model types
+            print(f"Unknown model type '{model_type}', falling back to transformer")
+            model_type = "transformer"
+            updated_graph_path = prepare_traffic_based_search(
+                origin, destination, start_time, 
+                chunked_graph_path=chunked_graph_path, 
+                output_path=output_path
+            )
         
         if updated_graph_path:
             # Parse the updated graph to extract edge costs
@@ -638,7 +715,6 @@ def get_traffic_predictions(start_time, origin, destination):
             
             # Parse the updated graph file to get edges with new costs
             _, edges, _, _ = parse_graph_file(updated_graph_path)
-            
             # Format edges as tuples for compatibility with the apply_traffic_costs method
             time_costs = {}
             for edge_str, cost in edges.items():
@@ -654,17 +730,20 @@ def get_traffic_predictions(start_time, origin, destination):
             
             return {
                 'status': 'success',
-                'time_costs': time_costs
+                'time_costs': time_costs,
+                'model_used': model_type
             }
         else:            
             return {
                 'status': 'error',
-                'error': 'Failed to prepare traffic-based search graph'
+                'error': 'Failed to prepare traffic-based search graph',
+                'model_used': model_type
             }
     except Exception as e:
         return {
             'status': 'error',
-            'error': f"Error in traffic prediction: {str(e)}\n{traceback.format_exc()}"
+            'error': f"Error in traffic prediction: {str(e)}\n{traceback.format_exc()}",
+            'model_used': model_type if 'model_type' in locals() else 'unknown'
         }
 
 def main():
